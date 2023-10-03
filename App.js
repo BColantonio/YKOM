@@ -17,7 +17,7 @@ function LogInScreen({ navigation }) {
         secureTextEntry
         onChangeText={this.handlePasswordChange}
       />
-      <Button title="go" onPress={this.handleLogin} />
+      <Button title="log in" onPress={this.handleLogin} />
       {/* "Sign Up" link */}
       <Text style={styles.subtext}>or</Text>
       <Button title="sign up" onPress={() => navigation.navigate('sign up')} />
