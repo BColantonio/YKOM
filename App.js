@@ -25,7 +25,7 @@ function LogInScreen({ navigation }) {
   );
 }
 
-function SignUpScreen() {
+function SignUpScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <TextInput
@@ -45,11 +45,35 @@ function SignUpScreen() {
         secureTextEntry
         onChangeText={this.handleConfirmPasswordChange}
       />
-      <Button title="sign up" onPress={this.handleSignUp} />
+      <Button title="sign up" onPress={() => navigation.navigate('profile')} />
     </View>
   );
 }
 
+function ProfileScreen({ navigation }) {
+  return (
+    <View style={styles.container}>
+      {/* <TextInput
+        style={styles.input}
+        placeholder="Email"
+        onChangeText={this.handleEmailChange}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        secureTextEntry
+        onChangeText={this.handlePasswordChange}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Confirm Password"
+        secureTextEntry
+        onChangeText={this.handleConfirmPasswordChange}
+      /> */}
+      <Button title="save" onPress={() => navigation.navigate('home')} />
+    </View>
+  );
+}
 const Stack = createNativeStackNavigator();
 
 function App() {
@@ -58,6 +82,7 @@ function App() {
       <Stack.Navigator initialRouteName="log in">
         <Stack.Screen name="log in" component={LogInScreen} />
         <Stack.Screen name="sign up" component={SignUpScreen} />
+        <Stack.Screen name="profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
