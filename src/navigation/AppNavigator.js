@@ -8,10 +8,7 @@ import SignUpScreen from '../screens/SignUpScreen';
 const AuthNavigator = createStackNavigator(
   {
     Login: LoginScreen,
-    SignUp: SignUpScreen,
-  },
-  {
-    initialRouteName: 'Login', // Set the initial screen to be displayed
+    SignUp: SignUpScreen
   }
 );
 

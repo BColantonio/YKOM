@@ -2,7 +2,7 @@
 import React, { Component } from 'react';
 import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
 import { connect } from 'react-redux';
-import { loginSuccess, signUpSuccess } from '../../store/authActions';
+import { loginSuccess } from '../../store/authActions';
 
 class LoginScreen extends Component {
   state = {
