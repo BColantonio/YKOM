@@ -4,13 +4,6 @@ import { globalStyles } from '../styles/global';
 import { SignUpScreen } from './signup';
 
 export default function LogInScreen({ navigation }) {
-  const handleSignup = () => {
-    return (
-      <View>
-        <SignUpScreen />
-      </View>
-    )
-  }
   return (
     <View style={globalStyles.container}>
       <TextInput
