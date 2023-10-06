@@ -45,6 +45,11 @@ export const globalStyles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: sizing.button
   },
+  buttonTextForgotPassword: {
+    textAlign: 'center',
+    lineHeight: sizing.button,
+    color: colors.secondary
+  },
   container: {
     flex: 1,
     backgroundColor: colors.primary,

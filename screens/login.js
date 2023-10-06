@@ -17,11 +17,14 @@ export default function LogInScreen({ navigation }) {
         onChangeText={console.log('textchange')}
       />
       <Pressable style={globalStyles.buttonLogin} onPress={() => navigation.navigate('Home')}>
-        <Text style={globalStyles.buttonText}>log in</Text>
+        <Text style={globalStyles.buttonText}>Log In</Text>
       </Pressable>
       {/* <Text style={globalStyles.subtext}>or</Text> */}
       <Pressable style={globalStyles.buttonSignup} onPress={console.log('handleSignup')}>
-        <Text style={globalStyles.buttonText}>sign up</Text>
+        <Text style={globalStyles.buttonText}>Sign Up</Text>
+      </Pressable>
+      <Pressable onPress={console.log('handleForgottenPassword')}>
+        <Text style={globalStyles.buttonTextForgotPassword}>Forgot Password</Text>
       </Pressable>
       
     </View>
