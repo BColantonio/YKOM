@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import { Button, Pressable, View, Text, TextInput } from 'react-native';
 import { globalStyles } from '../styles/global';
 
 export default function LogInScreen({ navigation }) {
@@ -16,9 +16,14 @@ export default function LogInScreen({ navigation }) {
         secureTextEntry
         onChangeText={console.log('textchange')}
       />
-      <Button title="log in" onPress={() => navigation.navigate('Home')} />
+      <Pressable style={globalStyles.buttonLogin} onPress={() => navigation.navigate('Home')}>
+        <Text style={globalStyles.buttonText}>log in</Text>
+      </Pressable>
       {/* <Text style={globalStyles.subtext}>or</Text> */}
-      <Button title="sign up" onPress={console.log('handleSignup')} />
+      <Pressable style={globalStyles.buttonSignup} onPress={console.log('handleSignup')}>
+        <Text style={globalStyles.buttonText}>sign up</Text>
+      </Pressable>
+      
     </View>
   );
 }

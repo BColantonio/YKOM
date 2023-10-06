@@ -12,15 +12,43 @@ const layout = {
 }
 
 const colors = {
-  primary: '#6667AB',
-  light: '#fff',
-  dark: '#111',
+  primary: '#2B2D31',
+  secondary: '#EFF9F0',
+  action: '#EF233C',
+  secondary2: '#DDC8C4',
+  action2: '#3891A6'
+}
+
+const spacing = {
+  small: 4,
+  max: 100
+}
+
+const sizing = {
+  button: 40
 }
 
 export const globalStyles = StyleSheet.create({
+  buttonGroup: {
+    height: spacing.max
+  },
+  buttonLogin: {
+    backgroundColor: colors.action,
+    height: sizing.button,
+    marginBottom: spacing.small
+  },
+  buttonSignup: {
+    backgroundColor: colors.secondary,
+    height: sizing.button
+  },
+  buttonText: {
+    textAlign: 'center',
+    lineHeight: sizing.button
+  },
   container: {
     flex: 1,
     backgroundColor: colors.primary,
+    justifyContent: 'center',
     padding: layout.spacing,
   },
   card: {
@@ -51,7 +79,7 @@ export const globalStyles = StyleSheet.create({
       marginBottom: 0,
     },
     input: {
-      width: '80%',
+      width: '100%',
       height: 40,
       borderColor: 'gray',
       borderWidth: 1,
