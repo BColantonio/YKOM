@@ -2,6 +2,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import LoginScreen from '../screens/login';
 import HomeScreen from '../screens/home';
+import SettingsScreen from '../screens/settings';
+import ProfileScreen from '../screens/profile';
 
 // Import or replace SettingsScreen with the actual component
 // import SettingsScreen from '../screens/settings';
@@ -12,10 +14,11 @@ const Tab = createBottomTabNavigator();
 function MyTabs() {
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false }}>
-      <Tab.Screen name="Home" component={HomeScreen} />
-      {/* Import or replace SettingsScreen */}
-      {/* <Tab.Screen name="Settings" component={SettingsScreen} /> */}
+        initialRouteName="Home"
+        screenOptions={{ headerShown: false }}>
+        <Tab.Screen name="Profile" component={ProfileScreen} />
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
