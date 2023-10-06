@@ -1,0 +1,7 @@
+After cloning project, run npm install in project root directory.
+
+The project can be tested on an iOS device after downloading expo pro from the app store.
+
+npm start
+
+scanning the QR code provided by the terminal will launch the app on your iOS device.
