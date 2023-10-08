@@ -50,7 +50,11 @@ export const globalStyles = StyleSheet.create({
     lineHeight: sizing.button,
     color: colors.secondary
   },
+  centeredContent: {
+    alignItems: 'center', // Center content horizontally
+  },
   container: {
+    // alignItems: 'center', // Center horizontally
     flex: 1,
     backgroundColor: colors.primary,
     justifyContent: 'center',
@@ -77,6 +81,11 @@ export const globalStyles = StyleSheet.create({
     flexDirection: 'row',
     columnGap: layout.spacing / 2,
     alignItems: 'center',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16, // Add some spacing between the toggle and content
   },
   icon: {},
     subtext: {

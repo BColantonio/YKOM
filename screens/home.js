@@ -1,12 +1,12 @@
 import * as React from 'react';
-import { View, Text, Dimensions, Animated } from 'react-native';
+import { View, Text, Dimensions, Animated, TouchableOpacity, FlatList, Switch, ScrollView } from 'react-native';
 import { globalStyles } from '../styles/global';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import data from '../data';
 
 const maxVisibleItems = 8;
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const _size = width * 0.9;
 
 const layout = {
@@ -94,25 +94,59 @@ function Card({ info, index, totalLength, onSwipe }) {
 
 export default function HomeScreen({ navigation }) {
   const [currentIndex, setCurrentIndex] = React.useState(0);
+  const [isListView, setIsListView] = React.useState(false); // State for toggle
+  const [toggleValue, setToggleValue] = React.useState(false); // State for the Switch
 
   const handleSwipe = () => {
     // Handle card dismissal logic here, e.g., remove the card from the data array
     setCurrentIndex((prevIndex) => prevIndex + 1);
   };
 
+  const renderItem = ({ item }) => {
+    if (isListView) {
+      // Render list view
+      return (
+        <View style={globalStyles.listViewItem}>
+          <Text>{item.type}</Text>
+          <Text>{item.from} - {item.to}</Text>
+          <Text>{item.distance} km</Text>
+          <Text>{item.role}</Text>
+        </View>
+      );
+    } else {
+      // Render card view
+      return (
+        <Card
+          info={item}
+          index={currentIndex}
+          totalLength={data.length - 1}
+          onSwipe={handleSwipe}
+        />
+      );
+    }
+  };
+
   return (
-    <View style={globalStyles.container}>
-      {data.slice(currentIndex, currentIndex + 1).map((c, index) => {
-        return (
-          <Card
-            info={c}
-            key={c.id}
-            index={index}
-            totalLength={data.length - 1}
-            onSwipe={handleSwipe}
-          />
-        );
-      })}
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+        <Text>List View</Text>
+        <Switch
+          value={toggleValue}
+          onValueChange={(value) => {
+            setToggleValue(value);
+            setIsListView(value);
+          }}
+        />
+        <Text>Card View</Text>
+      </View>
+
+      {/* Content */}
+      <FlatList
+        data={data.slice(currentIndex, currentIndex + 1)}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id.toString()}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
+      />
     </View>
   );
 }
