@@ -61,7 +61,7 @@ export const globalStyles = StyleSheet.create({
     width: layout.width,
     height: layout.height,
     padding: layout.spacing,
-    backgroundColor: colors.light,
+    backgroundColor: colors.secondary,
   },
   title: { fontSize: 32, fontWeight: '600' },
   subtitle: {},
