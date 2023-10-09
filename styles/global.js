@@ -73,6 +73,12 @@ export const globalStyles = StyleSheet.create({
     gap: layout.spacing,
     marginBottom: layout.spacing,
   },
+  homeScreen: {
+    flex: 1, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    backgroundColor: colors.primary 
+  },
   locationImage: {
     flex: 1,
     borderRadius: layout.borderRadius - layout.spacing / 2,
@@ -81,6 +87,9 @@ export const globalStyles = StyleSheet.create({
     flexDirection: 'row',
     columnGap: layout.spacing / 2,
     alignItems: 'center',
+  },
+  textOnDark: {
+    color: colors.secondary
   },
   toggleContainer: {
     flexDirection: 'row',

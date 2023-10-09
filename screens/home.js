@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { View, Text, Dimensions, Animated, Switch, ScrollView } from 'react-native';
+import { View, Text, Dimensions, Animated, Switch, ScrollView, FlatList, TouchableOpacity, Pressable } from 'react-native';
 import { globalStyles } from '../styles/global';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import data from '../data';
+import ExpandedCard from '../components/expandedCard';
 
 const maxVisibleItems = 8;
 
@@ -25,7 +26,7 @@ const SWIPE_ACTIONS = {
   DOWN: 'MAYBE',
 };
 
-function Card({ info, index, totalLength, onSwipe }) {
+function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
   const translateX = new Animated.Value(0);
   const translateY = new Animated.Value(0);
 
@@ -45,104 +46,128 @@ function Card({ info, index, totalLength, onSwipe }) {
     if (event.nativeEvent.oldState === State.ACTIVE) {
       const { translationX, translationY } = event.nativeEvent;
 
-      if (Math.abs(translationX) > width / 2) {
-        // Card swiped far enough, dismiss it
+      if (Math.abs(translationX) > width / 2 || Math.abs(translationY) > height / 2) {
+        // Card swiped far enough in any direction, dismiss it
         onSwipe();
       } else {
         // Reset the card position
         Animated.spring(translateX, {
           toValue: 0,
-          useNativeDriver: false, // Ensure to set useNativeDriver to false for Android compatibility
+          useNativeDriver: false,
+        }).start();
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: false,
         }).start();
       }
     }
   };
 
   return (
-    <PanGestureHandler
-      onGestureEvent={onGestureEvent}
-      onHandlerStateChange={onHandlerStateChange}
-    >
-      <Animated.View
-        style={[
-          globalStyles.card,
-          {
-            transform: [{ translateX }, { translateY }],
-          },
-        ]}
-      >
-        <Text
-        style={[
-          globalStyles.title,
-          {
-            position: 'absolute',
-            top: -layout.spacing,
-            right: layout.spacing,
-            fontSize: 102,
-            opacity: 0.05,
-          },
-        ]}
-        >
-          {index}
-        </Text>
-        <View style={globalStyles.cardContent}>
-          <Text style={globalStyles.title}>{info.type}</Text>
-          <View style={globalStyles.row}>
-            <Text style={globalStyles.subtitle}>
-              {info.from} - {info.to}
-            </Text>
-          </View>
-          <View style={globalStyles.row}>
-            <Text style={globalStyles.subtitle}>{info.distance} km</Text>
-          </View>
-          <View style={globalStyles.row}>
-            <Text style={globalStyles.subtitle}>{info.role}</Text>
-          </View>
-        </View>
-      </Animated.View>
-    </PanGestureHandler>
+    <TouchableOpacity onPress={() => (isExpanded ? onCardClick() : null)}>
+      <View>
+        {isExpanded ? (
+          <ExpandedCard info={info} onClose={onCardClick} />
+        ) : (
+          <PanGestureHandler
+            onGestureEvent={onGestureEvent}
+            onHandlerStateChange={onHandlerStateChange}
+          >
+            <Animated.View
+              style={[
+                globalStyles.card,
+                {
+                  transform: [{ translateX }, { translateY }],
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  globalStyles.title,
+                  {
+                    position: 'absolute',
+                    top: -layout.spacing,
+                    right: layout.spacing,
+                    fontSize: 102,
+                    opacity: 0.05,
+                  },
+                ]}
+              >
+                {index}
+              </Text>
+              <View style={globalStyles.cardContent}>
+                <Text style={globalStyles.title}>{info.type}</Text>
+                <View style={globalStyles.row}>
+                  <Text style={globalStyles.subtitle}>
+                    {info.from} - {info.to}
+                  </Text>
+                </View>
+                <View style={globalStyles.row}>
+                  <Text style={globalStyles.subtitle}>{info.distance} km</Text>
+                </View>
+                <View style={globalStyles.row}>
+                  <Text style={globalStyles.subtitle}>{info.role}</Text>
+                </View>
+              </View>
+            </Animated.View>
+          </PanGestureHandler>
+        )}
+      </View>
+    </TouchableOpacity>
   );
 }
 
 export default function HomeScreen({ navigation }) {
   const [currentIndex, setCurrentIndex] = React.useState(0);
-  const [isListView, setIsListView] = React.useState(false); // State for toggle
-  const [toggleValue, setToggleValue] = React.useState(false); // State for the Switch
+  const [isListView, setIsListView] = React.useState(true); // State for toggle
+  const [toggleValue, setToggleValue] = React.useState(true); // State for the Switch
+  const [expandedCard, setExpandedCard] = React.useState(null);
 
   const handleSwipe = () => {
     // Handle card dismissal logic here, e.g., remove the card from the data array
     setCurrentIndex((prevIndex) => prevIndex + 1);
   };
 
+  const handleCardClick = (item) => {
+    // Set the clicked card as expanded
+    setExpandedCard(item);
+  };
+  
+  const handleCloseExpandedCard = () => {
+    // Close the expanded card view
+    setExpandedCard(null);
+  };
+
   const renderItem = ({ item }) => {
     if (isListView) {
+      // Render card view
+      return (
+        <TouchableOpacity onPress={() => handleCardClick(item)}>
+          <Card
+            info={item}
+            index={currentIndex}
+            totalLength={data.length - 1}
+            onSwipe={handleSwipe}
+          />
+        </TouchableOpacity>
+      );
+    } else {
       // Render list view
       return (
         <View style={globalStyles.listViewItem}>
-          <Text>{item.type}</Text>
-          <Text>{item.from} - {item.to}</Text>
-          <Text>{item.distance} km</Text>
-          <Text>{item.role}</Text>
+          <Text style={globalStyles.textOnDark}>{item.type}</Text>
+          <Text style={globalStyles.textOnDark}>{item.from} - {item.to}</Text>
+          <Text style={globalStyles.textOnDark}>{item.distance} km</Text>
+          <Text style={globalStyles.textOnDark}>{item.role}</Text>
         </View>
-      );
-    } else {
-      // Render card view
-      return (
-        <Card
-          info={item}
-          index={currentIndex}
-          totalLength={data.length - 1}
-          onSwipe={handleSwipe}
-        />
       );
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
-      {/* Toggle */}
-      <View style={globalStyles.toggleContainer}>
-        <Text>List View</Text>
+    <View style={globalStyles.homeScreen}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={globalStyles.textOnDark}>List</Text>
         <Switch
           value={toggleValue}
           onValueChange={(value) => {
@@ -150,23 +175,29 @@ export default function HomeScreen({ navigation }) {
             setIsListView(value);
           }}
         />
-        <Text>Card View</Text>
+        <Text style={globalStyles.textOnDark}>Card</Text>
       </View>
-
-      {/* Content */}
-      <View style={{ justifyContent: 'center' }}>
-        {data.slice(currentIndex, currentIndex + 1).map((c, index) => {
-          return (
-            <Card
-              info={c}
-              index={index}
-              totalLength={data.length - 1}
-              onSwipe={handleSwipe}
-              key={c.id}
-            />
-          );
-        })}
-      </View>
-    </ScrollView>
+      {!isListView ? (
+        <FlatList
+          data={data}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id.toString()}
+        />
+      ) : (
+        <ScrollView>
+          <FlatList
+            data={data.slice(currentIndex, currentIndex + 1)}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id.toString()}
+          />
+          <Pressable onPress={console.log('skip this card')}>
+            <Text style={globalStyles.textOnDark}>Skip</Text>
+          </Pressable>
+        </ScrollView>
+      )}
+      {expandedCard && (
+        <ExpandedCard info={expandedCard} onClose={handleCloseExpandedCard} />
+      )}
+    </View>
   );
 }
