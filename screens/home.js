@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View, Text, Dimensions, Animated, TouchableOpacity, FlatList, Switch, ScrollView } from 'react-native';
+import { View, Text, Dimensions, Animated, Switch, ScrollView } from 'react-native';
 import { globalStyles } from '../styles/global';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import data from '../data';
@@ -17,14 +17,24 @@ const layout = {
   cardsGap: 22,
 };
 
+// Define action constants
+const SWIPE_ACTIONS = {
+  LEFT: 'NO',
+  RIGHT: 'YES',
+  UP: 'GET ME IN THE MOOD FIRST',
+  DOWN: 'MAYBE',
+};
+
 function Card({ info, index, totalLength, onSwipe }) {
   const translateX = new Animated.Value(0);
+  const translateY = new Animated.Value(0);
 
   const onGestureEvent = Animated.event(
     [
       {
         nativeEvent: {
           translationX: translateX,
+          translationY: translateY,
         },
       },
     ],
@@ -33,7 +43,9 @@ function Card({ info, index, totalLength, onSwipe }) {
 
   const onHandlerStateChange = (event) => {
     if (event.nativeEvent.oldState === State.ACTIVE) {
-      if (Math.abs(event.nativeEvent.translationX) > width / 2) {
+      const { translationX, translationY } = event.nativeEvent;
+
+      if (Math.abs(translationX) > width / 2) {
         // Card swiped far enough, dismiss it
         onSwipe();
       } else {
@@ -55,7 +67,7 @@ function Card({ info, index, totalLength, onSwipe }) {
         style={[
           globalStyles.card,
           {
-            transform: [{ translateX }],
+            transform: [{ translateX }, { translateY }],
           },
         ]}
       >
@@ -127,8 +139,9 @@ export default function HomeScreen({ navigation }) {
   };
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+    <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
+      {/* Toggle */}
+      <View style={globalStyles.toggleContainer}>
         <Text>List View</Text>
         <Switch
           value={toggleValue}
@@ -141,12 +154,19 @@ export default function HomeScreen({ navigation }) {
       </View>
 
       {/* Content */}
-      <FlatList
-        data={data.slice(currentIndex, currentIndex + 1)}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
-      />
-    </View>
+      <View style={{ justifyContent: 'center' }}>
+        {data.slice(currentIndex, currentIndex + 1).map((c, index) => {
+          return (
+            <Card
+              info={c}
+              index={index}
+              totalLength={data.length - 1}
+              onSwipe={handleSwipe}
+              key={c.id}
+            />
+          );
+        })}
+      </View>
+    </ScrollView>
   );
 }
