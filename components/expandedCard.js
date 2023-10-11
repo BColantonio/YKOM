@@ -1,21 +1,44 @@
-import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { globalStyles } from '../styles/global';
+import React, { useState } from 'react';
+import { View, Text, Pressable, Animated, Easing } from 'react-native';
 
-function ExpandedCard({ info, onClose }) {
+export default function ExpandedCard() {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const expandCard = () => {
+    setIsExpanded(!isExpanded);
+  };
+
+  const cardHeight = isExpanded ? 200 : 100; // Adjust the height values as needed
+  const animationDuration = 300; // Adjust the animation duration as needed
+
+  const cardHeightAnim = new Animated.Value(cardHeight);
+
+  const toggleCardHeight = () => {
+    Animated.timing(cardHeightAnim, {
+      toValue: isExpanded ? 100 : 200,
+      duration: animationDuration,
+      easing: Easing.linear,
+      useNativeDriver: false, // Required for height animations
+    }).start(expandCard);
+  };
+
   return (
-    <View style={globalStyles.container}>
-      <TouchableOpacity style={globalStyles.card} onPress={onClose}>
-        <Text style={globalStyles.title}>{info.type}</Text>
-        <View style={globalStyles.cardContent}>
-          <Text style={globalStyles.subtitle}>{info.from} - {info.to}</Text>
-          <Text style={globalStyles.subtitle}>{info.distance} km</Text>
-          <Text style={globalStyles.subtitle}>{info.role}</Text>
-          {/* Add more information as needed */}
-        </View>
-      </TouchableOpacity>
+    <View>
+      <Pressable onPress={toggleCardHeight}>
+        <Animated.View
+          style={{
+            height: cardHeightAnim,
+            backgroundColor: 'lightblue',
+            borderRadius: 10,
+            padding: 16,
+            margin: 10,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text>Click to Expand/Collapse</Text>
+        </Animated.View>
+      </Pressable>
     </View>
   );
 }
-
-export default ExpandedCard;

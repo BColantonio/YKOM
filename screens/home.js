@@ -1,5 +1,15 @@
-import * as React from 'react';
-import { View, Text, Dimensions, Animated, Switch, ScrollView, FlatList, TouchableOpacity, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import {
+        View,
+        Text,
+        Dimensions,
+        Animated,
+        Switch,
+        ScrollView,
+        FlatList,
+        Pressable,
+        Easing
+      } from 'react-native';
 import { globalStyles } from '../styles/global';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import data from '../data';
@@ -29,6 +39,8 @@ const SWIPE_ACTIONS = {
 function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
   const translateX = new Animated.Value(0);
   const translateY = new Animated.Value(0);
+  const [cardHeight, setCardHeight] = useState(100);
+  const cardHeightAnim = new Animated.Value(cardHeight);
 
   const onGestureEvent = Animated.event(
     [
@@ -63,9 +75,23 @@ function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
     }
   };
 
+  const toggleCardHeight = () => {
+    Animated.timing(cardHeightAnim, {
+      toValue: isExpanded ? 100 : 200,
+      duration: 300, // Adjust animation duration as needed
+      easing: Easing.linear,
+      useNativeDriver: false,
+    }).start(onCardClick);
+  };
+
   return (
-    <TouchableOpacity onPress={() => (isExpanded ? onCardClick() : null)}>
-      <View>
+    <Pressable onPress={toggleCardHeight}>
+      <Animated.View
+        style={{
+          height: cardHeightAnim,
+          // Add your card styles here
+        }}
+      >
         {isExpanded ? (
           <ExpandedCard info={info} onClose={onCardClick} />
         ) : (
@@ -112,16 +138,16 @@ function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
             </Animated.View>
           </PanGestureHandler>
         )}
-      </View>
-    </TouchableOpacity>
+      </Animated.View>
+    </Pressable>
   );
 }
 
 export default function HomeScreen({ navigation }) {
-  const [currentIndex, setCurrentIndex] = React.useState(0);
-  const [isListView, setIsListView] = React.useState(true); // State for toggle
-  const [toggleValue, setToggleValue] = React.useState(true); // State for the Switch
-  const [expandedCard, setExpandedCard] = React.useState(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isListView, setIsListView] = useState(true); // State for toggle
+  const [toggleValue, setToggleValue] = useState(true); // State for the Switch
+  const [expandedCard, setExpandedCard] = useState(null);
 
   const handleSwipe = () => {
     // Handle card dismissal logic here, e.g., remove the card from the data array
@@ -130,6 +156,7 @@ export default function HomeScreen({ navigation }) {
 
   const handleCardClick = (item) => {
     // Set the clicked card as expanded
+    console.log(item);
     setExpandedCard(item);
   };
   
@@ -142,14 +169,18 @@ export default function HomeScreen({ navigation }) {
     if (isListView) {
       // Render card view
       return (
-        <TouchableOpacity onPress={() => handleCardClick(item)}>
+        <Pressable onPress={() => onCardClick(item)}>
           <Card
             info={item}
             index={currentIndex}
             totalLength={data.length - 1}
             onSwipe={handleSwipe}
+            isExpanded={expandedCard === item}
+            onCardClick={handleCardClick}
           />
-        </TouchableOpacity>
+        </Pressable>
+
+
       );
     } else {
       // Render list view
@@ -190,7 +221,7 @@ export default function HomeScreen({ navigation }) {
             renderItem={renderItem}
             keyExtractor={(item) => item.id.toString()}
           />
-          <Pressable onPress={console.log('skip this card')}>
+          <Pressable onPress={() => console.log('skip this card')}>
             <Text style={globalStyles.textOnDark}>Skip</Text>
           </Pressable>
         </ScrollView>
