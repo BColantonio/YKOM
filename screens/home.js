@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
         View,
         Text,
@@ -13,7 +13,6 @@ import {
 import { globalStyles } from '../styles/global';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import data from '../data';
-import ExpandedCard from '../components/expandedCard';
 
 const maxVisibleItems = 8;
 
@@ -39,8 +38,9 @@ const SWIPE_ACTIONS = {
 function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
   const translateX = new Animated.Value(0);
   const translateY = new Animated.Value(0);
-  const [cardHeight, setCardHeight] = useState(100);
-  const cardHeightAnim = new Animated.Value(cardHeight);
+  const [cardHeight, setCardHeight] = useState(200);
+  const cardHeightAnim = useRef(new Animated.Value(cardHeight)).current;
+  // const cardHeightAnim = new Animated.Value(cardHeight);
 
   const onGestureEvent = Animated.event(
     [
@@ -77,7 +77,7 @@ function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
 
   const toggleCardHeight = () => {
     Animated.timing(cardHeightAnim, {
-      toValue: isExpanded ? 100 : 200,
+      toValue: isExpanded ? 200 : 500,
       duration: 300, // Adjust animation duration as needed
       easing: Easing.linear,
       useNativeDriver: false,
@@ -92,52 +92,48 @@ function Card({ info, index, totalLength, onSwipe, isExpanded, onCardClick }) {
           // Add your card styles here
         }}
       >
-        {isExpanded ? (
-          <ExpandedCard info={info} onClose={onCardClick} />
-        ) : (
-          <PanGestureHandler
-            onGestureEvent={onGestureEvent}
-            onHandlerStateChange={onHandlerStateChange}
+        <PanGestureHandler
+          onGestureEvent={onGestureEvent}
+          onHandlerStateChange={onHandlerStateChange}
+        >
+          <Animated.View
+            style={[
+              globalStyles.card,
+              {
+                transform: [{ translateX }, { translateY }],
+              },
+            ]}
           >
-            <Animated.View
+            <Text
               style={[
-                globalStyles.card,
+                globalStyles.title,
                 {
-                  transform: [{ translateX }, { translateY }],
+                  position: 'absolute',
+                  top: -layout.spacing,
+                  right: layout.spacing,
+                  fontSize: 102,
+                  opacity: 0.05,
                 },
               ]}
             >
-              <Text
-                style={[
-                  globalStyles.title,
-                  {
-                    position: 'absolute',
-                    top: -layout.spacing,
-                    right: layout.spacing,
-                    fontSize: 102,
-                    opacity: 0.05,
-                  },
-                ]}
-              >
-                {index}
-              </Text>
-              <View style={globalStyles.cardContent}>
-                <Text style={globalStyles.title}>{info.type}</Text>
-                <View style={globalStyles.row}>
-                  <Text style={globalStyles.subtitle}>
-                    {info.from} - {info.to}
-                  </Text>
-                </View>
-                <View style={globalStyles.row}>
-                  <Text style={globalStyles.subtitle}>{info.distance} km</Text>
-                </View>
-                <View style={globalStyles.row}>
-                  <Text style={globalStyles.subtitle}>{info.role}</Text>
-                </View>
+              {index}
+            </Text>
+            <View style={globalStyles.cardContent}>
+              <Text style={globalStyles.title}>{info.type}</Text>
+              <View style={globalStyles.row}>
+                <Text style={globalStyles.subtitle}>
+                  {info.from} - {info.to}
+                </Text>
               </View>
-            </Animated.View>
-          </PanGestureHandler>
-        )}
+              <View style={globalStyles.row}>
+                <Text style={globalStyles.subtitle}>{info.distance} km</Text>
+              </View>
+              <View style={globalStyles.row}>
+                <Text style={globalStyles.subtitle}>{info.role}</Text>
+              </View>
+            </View>
+          </Animated.View>
+        </PanGestureHandler>
       </Animated.View>
     </Pressable>
   );
@@ -222,12 +218,9 @@ export default function HomeScreen({ navigation }) {
             keyExtractor={(item) => item.id.toString()}
           />
           <Pressable onPress={() => console.log('skip this card')}>
-            <Text style={globalStyles.textOnDark}>Skip</Text>
+             <Text style={globalStyles.textOnDark}>Skip</Text>
           </Pressable>
         </ScrollView>
-      )}
-      {expandedCard && (
-        <ExpandedCard info={expandedCard} onClose={handleCloseExpandedCard} />
       )}
     </View>
   );
