@@ -48,3 +48,20 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Security Before Production
+
+Before deploying, review Supabase security settings:
+
+- Verify whether **Anonymous Auth** should remain enabled. It is currently used for local testing.
+- Confirm RLS policies for `user_kink_preferences` enforce the intended access model.
+- Confirm foreign key relationships and delete behavior are still correct for `auth.users`, `kinks`, and `categories`.
+- Remove or gate any dev-only test flows that could create unintended writes in production.
+
+## Launch Checklist
+
+- Verify all required environment variables are set for production.
+- Confirm Supabase project URL and keys are pointing to the production project.
+- Run lint and type checks (`npm run lint` and `npx tsc --noEmit`).
+- Validate critical user flows on iOS and Android (onboarding, swiping, persistence, compatibility score).
+- Confirm error logging/monitoring is enabled and visible before release.
