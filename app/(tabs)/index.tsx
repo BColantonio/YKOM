@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,39 +19,24 @@ type PreferenceValue = number | null;
 
 const DEV_HARDCODED_MODE = true;
 
-const KINK_CATEGORIES: KinkCategory[] = [
-  { id: 1, label: 'Bondage & restraint' },
-  { id: 2, label: 'Role play & fantasy' },
-  { id: 3, label: 'Sensory play' },
-  { id: 4, label: 'Power exchange (D/s)' },
-];
+const KINK_LABELS = ['Bondage & restraint', 'Role play & fantasy', 'Sensory play', 'Power exchange (D/s)'];
 
 const SWIPE_VALUES: Record<SwipeDirection, number> = { no: 0, yes: 100, mood: 67, probablyNot: 33 };
-const SWIPE_LABELS: Record<SwipeDirection, string> = { no: 'NO', yes: 'YES', mood: 'MOOD', probablyNot: 'PROBABLY NOT' };
-const HARDCODED_USER_B_PREFS: Map<number, PreferenceValue> = new Map([
-  [1, 100],
-  [2, 67],
-  [3, 33],
-  [4, 0],
-  [5, 67],
-  [6, 33],
-  [7, 100],
-  [8, 67],
-  [9, 33],
-  [10, 100],
-  [11, 67],
-  [12, 0],
-]);
-
+const SWIPE_LABELS: Record<SwipeDirection, string> = {
+  no: 'NO',
+  yes: 'YES',
+  mood: 'GET ME IN THE MOOD FIRST',
+  probablyNot: 'MAYBE',
+};
 function categoryCompatibility(a: number, b: number): number {
   const diff = Math.abs(a - b);
   return 100 - diff;
 }
 
-function overallCompatibility(aPrefs: Map<number, PreferenceValue>, bPrefs: Map<number, PreferenceValue>) {
+function overallCompatibility(categories: KinkCategory[], aPrefs: Map<number, PreferenceValue>, bPrefs: Map<number, PreferenceValue>) {
   let sum = 0;
   let comparableCount = 0;
-  for (const kink of KINK_CATEGORIES) {
+  for (const kink of categories) {
     const a = aPrefs.get(kink.id);
     const b = bPrefs.get(kink.id);
     if (a == null || b == null) continue;
@@ -76,6 +61,16 @@ async function fetchOtherUserPreferences(excludeUserId: string) {
   }
   if (!data?.user_id) return null;
   return { userId: data.user_id, prefs: await getUserKinkPreferences(data.user_id) };
+}
+
+async function fetchDeckKinks(): Promise<KinkCategory[]> {
+  const { data, error } = await supabase.from('kinks').select('id,name').in('name', KINK_LABELS);
+  if (error) {
+    console.error('Failed to fetch deck kinks:', error.message);
+    return [];
+  }
+  const byName = new Map((data ?? []).map((row) => [row.name, row.id]));
+  return KINK_LABELS.map((label) => ({ id: byName.get(label) ?? -1, label })).filter((k) => k.id > 0);
 }
 
 function SwipeCard({
@@ -192,6 +187,7 @@ export default function HomeScreen() {
 
   const [index, setIndex] = useState(0);
   const [swipeResults, setSwipeResults] = useState<KinkSwipeResult[]>([]);
+  const [kinkCategories, setKinkCategories] = useState<KinkCategory[]>([]);
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [otherUserPrefs, setOtherUserPrefs] = useState<Map<number, PreferenceValue>>(new Map());
   const [compatibilityScore, setCompatibilityScore] = useState<number | null>(null);
@@ -204,10 +200,35 @@ export default function HomeScreen() {
     let cancelled = false;
     (async () => {
       setPrefsLoading(true);
+      const deck = await fetchDeckKinks();
+      setKinkCategories(deck);
+      if (deck.length === 0) {
+        setAuthMessage('No matching kinks found in database for current deck labels.');
+        setPrefsLoading(false);
+        return;
+      }
       if (DEV_HARDCODED_MODE) {
-        setCurrentUserId('dev-local-user');
-        setOtherUserPrefs(HARDCODED_USER_B_PREFS);
-        setAuthMessage('Using hardcoded dev users. Auth and DB writes are temporarily bypassed.');
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError && sessionError.message !== 'Auth session missing!') {
+          console.error('Failed to get current Supabase session:', sessionError.message);
+        }
+        let user = sessionData.session?.user ?? null;
+        if (!user) {
+          const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+          if (anonError) {
+            console.error('Anonymous sign-in failed:', anonError.message);
+          }
+          user = anonData.user ?? null;
+        }
+        if (!user) {
+          if (!cancelled) setPrefsLoading(false);
+          return;
+        }
+        setCurrentUserId(user.id);
+        await initializeUserKinkPreferences(user.id, deck.map((k) => k.id), null);
+        const loaded = await fetchOtherUserPreferences(user.id);
+        setOtherUserPrefs(loaded?.prefs ?? new Map());
+        setAuthMessage('Dev mode: using anonymous users. Tap switch to create/use another test user.');
         setPrefsLoading(false);
         return;
       }
@@ -237,7 +258,7 @@ export default function HomeScreen() {
       const userId = user.id;
       setCurrentUserId(userId);
       setAuthMessage(null);
-      await initializeUserKinkPreferences(userId, KINK_CATEGORIES.map((k) => k.id), null);
+      await initializeUserKinkPreferences(userId, deck.map((k) => k.id), null);
       const loaded = await fetchOtherUserPreferences(userId);
       if (cancelled) return;
       setOtherUserPrefs(loaded?.prefs ?? new Map());
@@ -249,53 +270,79 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (!currentUserId || index !== KINK_CATEGORIES.length || hasSaved) return;
-    if (DEV_HARDCODED_MODE) {
-      setHasSaved(true);
-      setSaveMessage('Dev mode: local profile saved (no database write).');
-      return;
-    }
+    if (!currentUserId || index !== kinkCategories.length || hasSaved) return;
     void (async () => {
       const ok = await upsertUserKinkPreferences(
         currentUserId,
-        KINK_CATEGORIES.map((kink) => ({
+        kinkCategories.map((kink) => ({
           kinkId: kink.id,
           value: swipeResults.find((r) => r.kinkId === kink.id)?.value ?? null,
         })),
       );
       if (ok) {
         setHasSaved(true);
-        setSaveMessage('Preferences saved.');
+        setSaveMessage(
+          DEV_HARDCODED_MODE
+            ? `Preferences saved to DB as ${currentUserId ?? 'anonymous user'}.`
+            : 'Preferences saved.',
+        );
       } else {
         setSaveMessage('Save failed. Check console for Supabase error details.');
       }
     })();
-  }, [index, swipeResults, hasSaved, currentUserId]);
+  }, [index, swipeResults, hasSaved, currentUserId, kinkCategories]);
 
   useEffect(() => {
-    if (index !== KINK_CATEGORIES.length) return;
+    if (index !== kinkCategories.length || kinkCategories.length === 0) return;
     const myPrefs = new Map<number, PreferenceValue>();
-    for (const kink of KINK_CATEGORIES) {
+    for (const kink of kinkCategories) {
       myPrefs.set(kink.id, swipeResults.find((r) => r.kinkId === kink.id)?.value ?? null);
     }
-    const score = overallCompatibility(myPrefs, otherUserPrefs);
+    const score = overallCompatibility(kinkCategories, myPrefs, otherUserPrefs);
     setCompatibilityScore(score == null ? null : score);
     console.log('Compatibility', { score: score == null ? null : Math.round(score * 10) / 10 });
-  }, [index, swipeResults, otherUserPrefs]);
+  }, [index, swipeResults, otherUserPrefs, kinkCategories]);
 
   const onSwipeComplete = useCallback((direction: SwipeDirection, kink: KinkCategory) => {
     setSwipeResults((prev) => [...prev, { kinkId: kink.id, value: SWIPE_VALUES[direction] }]);
     setIndex((i) => i + 1);
   }, []);
 
-  const current = KINK_CATEGORIES[index];
-  const next = KINK_CATEGORIES[index + 1];
+  const current = kinkCategories[index];
+  const next = kinkCategories[index + 1];
 
   return (
     <GestureHandlerRootView style={styles.root}>
       <ThemedView style={[styles.screen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 12 }]}>
         <ThemedText type="subtitle">Your kink or mine</ThemedText>
-        <ThemedText style={[styles.subheading, { color: palette.icon }]}>Left no · Right yes · Up mood · Down probably not</ThemedText>
+        <ThemedText style={[styles.subheading, { color: palette.icon }]}>
+          Left no · Right yes · Up get me in the mood first · Down maybe
+        </ThemedText>
+        {DEV_HARDCODED_MODE ? (
+          <Pressable
+            style={[styles.switchButton, { borderColor: palette.tint }]}
+            onPress={async () => {
+              await supabase.auth.signOut();
+              const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+              if (anonError || !anonData.user) {
+                setAuthMessage('Failed to switch test user.');
+                return;
+              }
+              const newUserId = anonData.user.id;
+              await initializeUserKinkPreferences(newUserId, kinkCategories.map((k) => k.id), null);
+              const loaded = await fetchOtherUserPreferences(newUserId);
+              setCurrentUserId(newUserId);
+              setOtherUserPrefs(loaded?.prefs ?? new Map());
+              setIndex(0);
+              setSwipeResults([]);
+              setCompatibilityScore(null);
+              setHasSaved(false);
+              setSaveMessage(null);
+              setAuthMessage('Switched to another anonymous test user.');
+            }}>
+            <ThemedText>Switch test user</ThemedText>
+          </Pressable>
+        ) : null}
         {authMessage ? <ThemedText style={[styles.subheading, { color: palette.icon }]}>{authMessage}</ThemedText> : null}
         {currentUserId == null ? (
           <ThemedText style={[styles.subheading, { color: palette.icon }]}>Sign in to save preferences.</ThemedText>
@@ -360,6 +407,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 20 },
   subheading: { fontSize: 14, marginBottom: 12 },
+  switchButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 8 },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },
   cardInner: { flex: 1, borderRadius: 20, borderWidth: 2, padding: 24, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
