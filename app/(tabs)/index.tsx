@@ -10,24 +10,16 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { supabase } from '@/lib/supabase';
+import { SWIPE_LABELS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
 import { getUserKinkPreferences, initializeUserKinkPreferences, upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 
 type KinkCategory = { id: number; label: string };
-type SwipeDirection = 'no' | 'yes' | 'mood' | 'probablyNot';
 type KinkSwipeResult = { kinkId: number; value: number };
 type PreferenceValue = number | null;
 
 const DEV_HARDCODED_MODE = true;
 
 const KINK_LABELS = ['Bondage & restraint', 'Role play & fantasy', 'Sensory play', 'Power exchange (D/s)'];
-
-const SWIPE_VALUES: Record<SwipeDirection, number> = { no: 0, yes: 100, mood: 67, probablyNot: 33 };
-const SWIPE_LABELS: Record<SwipeDirection, string> = {
-  no: 'NO',
-  yes: 'YES',
-  mood: 'GET ME IN THE MOOD FIRST',
-  probablyNot: 'MAYBE',
-};
 function categoryCompatibility(a: number, b: number): number {
   const diff = Math.abs(a - b);
   return 100 - diff;
