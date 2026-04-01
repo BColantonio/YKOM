@@ -29,6 +29,18 @@ import {
 } from '@/lib/grouped-kink-preferences';
 import { upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 
+/** Profile lists only kinks the user has committed (saved value: 0, 33, 67, or 100). */
+function preferencesWithCompletedSwipesOnly(
+  sections: GroupedKinkPreferencesByCategory[],
+): GroupedKinkPreferencesByCategory[] {
+  return sections
+    .map((section) => ({
+      ...section,
+      kinks: section.kinks.filter((k) => k.value != null),
+    }))
+    .filter((section) => section.kinks.length > 0);
+}
+
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
@@ -77,7 +89,7 @@ export default function ProfileScreen() {
     if (!userId) return;
     setPrefsLoading(true);
     const data = await fetchUserPreferencesGroupedByCategory(userId);
-    setGrouped(data);
+    setGrouped(preferencesWithCompletedSwipesOnly(data));
     setPrefsLoading(false);
   }, [userId]);
 
