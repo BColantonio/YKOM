@@ -293,15 +293,14 @@ export default function HomeScreen() {
   }, [index, swipeResults, hasSaved, currentUserId, kinkCategories]);
 
   useEffect(() => {
-    if (index !== kinkCategories.length || kinkCategories.length === 0) return;
+    if (kinkCategories.length === 0) return;
     const myPrefs = new Map<number, PreferenceValue>();
     for (const kink of kinkCategories) {
       myPrefs.set(kink.id, swipeResults.find((r) => r.kinkId === kink.id)?.value ?? null);
     }
     const score = overallCompatibility(kinkCategories, myPrefs, otherUserPrefs);
-    setCompatibilityScore(score == null ? null : score);
-    console.log('Compatibility', { score: score == null ? null : Math.round(score * 10) / 10 });
-  }, [index, swipeResults, otherUserPrefs, kinkCategories]);
+    setCompatibilityScore(score);
+  }, [swipeResults, otherUserPrefs, kinkCategories]);
 
   const onSwipeComplete = useCallback((direction: SwipeDirection, kink: KinkCategory) => {
     setSwipeResults((prev) => [...prev, { kinkId: kink.id, value: SWIPE_VALUES[direction] }]);
@@ -348,6 +347,11 @@ export default function HomeScreen() {
           <ThemedText style={[styles.subheading, { color: palette.icon }]}>Sign in to save preferences.</ThemedText>
         ) : null}
         {saveMessage ? <ThemedText style={[styles.subheading, { color: palette.icon }]}>{saveMessage}</ThemedText> : null}
+        {currentUserId != null && !prefsLoading && current != null && compatibilityScore != null ? (
+          <ThemedText type="defaultSemiBold" style={[styles.compatibilityLive, { color: palette.tint }]}>
+            Compatibility: {Math.round(compatibilityScore * 10) / 10}%
+          </ThemedText>
+        ) : null}
         <View style={styles.deck}>
           {prefsLoading ? (
             <ActivityIndicator size="large" color={palette.tint} />
@@ -407,6 +411,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 20 },
   subheading: { fontSize: 14, marginBottom: 12 },
+  compatibilityLive: { fontSize: 16, marginBottom: 8, textAlign: 'center' },
   switchButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 8 },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },
