@@ -38,6 +38,15 @@ function categoryCompatibility(a: number, b: number): number {
   return 100 - diff;
 }
 
+function shuffleArray<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function overallCompatibility(categories: KinkCategory[], aPrefs: Map<number, PreferenceValue>, bPrefs: Map<number, PreferenceValue>) {
   let sum = 0;
   let comparableCount = 0;
@@ -364,7 +373,16 @@ export default function HomeScreen() {
       const ids = new Set(prev.map((k) => k.id));
       const unique = fetched.filter((u) => !ids.has(u.id));
       if (unique.length > 0 && pos >= 0) {
-        const nextDeck = [...prev.slice(0, pos + 1), ...unique, ...prev.slice(pos + 1)];
+        // Keep the card that was already behind the swiped card (still "in view" as the back of the stack)
+        // at the immediate next slot; shuffle new unlocks only into the rest of the deck.
+        const stayNext = prev[pos + 1];
+        const deeper = prev.slice(pos + 2);
+        const pool = [...unique, ...deeper];
+        const shuffledPool = shuffleArray(pool);
+        const nextDeck =
+          stayNext != null
+            ? [...prev.slice(0, pos + 1), stayNext, ...shuffledPool]
+            : [...prev.slice(0, pos + 1), ...shuffledPool];
         setKinkCategories(nextDeck);
         showUnlockToast(unique.length);
         if (currentUserId) {
