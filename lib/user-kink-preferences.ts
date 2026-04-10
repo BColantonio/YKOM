@@ -5,6 +5,15 @@ export type UserKinkPreference = {
   value: number | null;
 };
 
+function normalizeKinkIdFromDb(id: unknown): number | null {
+  if (typeof id === 'number' && Number.isFinite(id)) return Math.trunc(id);
+  if (typeof id === 'string' && id.trim() !== '') {
+    const n = Number(id);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  return null;
+}
+
 /** Drops ids not present in `public.kinks` so upserts satisfy user_kink_preferences_kink_fk. */
 async function filterExistingKinkIds(kinkIds: number[]): Promise<number[]> {
   const unique = [...new Set(kinkIds)];
@@ -17,7 +26,11 @@ async function filterExistingKinkIds(kinkIds: number[]): Promise<number[]> {
     return [];
   }
 
-  const found = new Set((data ?? []).map((r) => r.id as number));
+  const found = new Set<number>();
+  for (const row of data ?? []) {
+    const n = normalizeKinkIdFromDb(row.id);
+    if (n != null) found.add(n);
+  }
   return unique.filter((id) => found.has(id));
 }
 
@@ -88,8 +101,9 @@ export async function upsertUserKinkPreferences(userId: string, preferences: Use
   const validIds = new Set(await filterExistingKinkIds(preferences.map((p) => p.kinkId)));
   const filtered = preferences.filter((p) => validIds.has(p.kinkId));
   if (filtered.length === 0) return;
-  if (filtered.length < preferences.length) {
-    console.warn('upsertUserKinkPreferences: skipping unknown kink ids');
+  if (filtered.length < preferences.length && typeof __DEV__ !== 'undefined' && __DEV__) {
+    const skipped = preferences.filter((p) => !validIds.has(p.kinkId)).map((p) => p.kinkId);
+    console.debug('upsertUserKinkPreferences: kink ids not in public.kinks (apply migrations or check DB)', skipped);
   }
 
   const payload = filtered.map((pref) => ({
@@ -115,8 +129,9 @@ export async function initializeUserKinkPreferences(userId: string, kinkIds: num
 
   const valid = await filterExistingKinkIds(kinkIds);
   if (valid.length === 0) return;
-  if (valid.length < kinkIds.length) {
-    console.warn('initializeUserKinkPreferences: skipping unknown kink ids');
+  if (valid.length < kinkIds.length && typeof __DEV__ !== 'undefined' && __DEV__) {
+    const skipped = kinkIds.filter((id) => !valid.includes(id));
+    console.debug('initializeUserKinkPreferences: kink ids not in public.kinks (apply migrations or check DB)', skipped);
   }
 
   const payload = valid.map((kinkId) => ({
