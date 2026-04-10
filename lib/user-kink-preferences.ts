@@ -21,6 +21,48 @@ async function filterExistingKinkIds(kinkIds: number[]): Promise<number[]> {
   return unique.filter((id) => found.has(id));
 }
 
+/**
+ * Finds the other user whose preferences were updated most recently (max per-user `updated_at`),
+ * then loads their full preference map. Excludes `excludeUserId`.
+ */
+export async function fetchMostRecentComparisonUserPreferences(
+  excludeUserId: string,
+): Promise<{ userId: string; prefs: Map<number, number | null> } | null> {
+  const { data, error } = await supabase
+    .from('user_kink_preferences')
+    .select('user_id, updated_at')
+    .neq('user_id', excludeUserId);
+
+  if (error) {
+    console.error('fetchMostRecentComparisonUserPreferences:', error.message);
+    return null;
+  }
+  if (!data?.length) return null;
+
+  const latestByUser = new Map<string, string>();
+  for (const row of data) {
+    const uid = String(row.user_id);
+    const t = row.updated_at as string | undefined;
+    if (!t) continue;
+    const prev = latestByUser.get(uid);
+    if (!prev || t > prev) latestByUser.set(uid, t);
+  }
+  if (latestByUser.size === 0) return null;
+
+  let bestUserId: string | null = null;
+  let bestTime = '';
+  for (const [uid, t] of latestByUser) {
+    if (t > bestTime) {
+      bestTime = t;
+      bestUserId = uid;
+    }
+  }
+  if (!bestUserId) return null;
+
+  const prefs = await getUserKinkPreferences(bestUserId);
+  return { userId: bestUserId, prefs };
+}
+
 export async function getUserKinkPreferences(userId: string): Promise<Map<number, number | null>> {
   const { data, error } = await supabase
     .from('user_kink_preferences')

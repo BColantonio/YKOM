@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +15,11 @@ import { baseDeckCategories } from '@/lib/local-kinks';
 import { supabase } from '@/lib/supabase';
 import { SWIPE_LABELS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
 import { SWIPE_LIMIT } from '@/lib/swipe-limit';
-import { getUserKinkPreferences, initializeUserKinkPreferences, upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
+import {
+  fetchMostRecentComparisonUserPreferences,
+  initializeUserKinkPreferences,
+  upsertUserKinkPreferences,
+} from '@/lib/user-kink-preferences';
 
 type KinkCategory = DeckKink;
 type KinkSwipeResult = { kinkId: number; value: number };
@@ -59,22 +63,6 @@ function overallCompatibility(categories: KinkCategory[], aPrefs: Map<number, Pr
   }
   if (comparableCount === 0) return null;
   return sum / comparableCount;
-}
-
-async function fetchOtherUserPreferences(excludeUserId: string) {
-  const { data, error } = await supabase
-    .from('user_kink_preferences')
-    .select('user_id,updated_at')
-    .neq('user_id', excludeUserId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.error('Failed to fetch other user:', error.message);
-    return null;
-  }
-  if (!data?.user_id) return null;
-  return { userId: data.user_id, prefs: await getUserKinkPreferences(data.user_id) };
 }
 
 function SwipeCard({
@@ -201,6 +189,8 @@ export default function HomeScreen() {
   const [kinkCategories, setKinkCategories] = useState<KinkCategory[]>([]);
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [otherUserPrefs, setOtherUserPrefs] = useState<Map<number, PreferenceValue>>(new Map());
+  /** True after load when no other user had preferences to compare against. */
+  const [comparisonUnavailable, setComparisonUnavailable] = useState(false);
   const [compatibilityScore, setCompatibilityScore] = useState<number | null>(null);
   const [hasSaved, setHasSaved] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -273,9 +263,10 @@ export default function HomeScreen() {
         }
         setCurrentUserId(user.id);
         await initializeUserKinkPreferences(user.id, deck.map((k) => k.id), null);
-        const loaded = await fetchOtherUserPreferences(user.id);
+        const loaded = await fetchMostRecentComparisonUserPreferences(user.id);
         setOtherUserPrefs(loaded?.prefs ?? new Map());
-        setAuthMessage('Dev mode: using anonymous users. Tap switch to create/use another test user.');
+        setComparisonUnavailable(!loaded);
+        setAuthMessage('Dev mode: anonymous session.');
         setPrefsLoading(false);
         return;
       }
@@ -315,9 +306,10 @@ export default function HomeScreen() {
       setCurrentUserId(userId);
       setAuthMessage(null);
       await initializeUserKinkPreferences(userId, deck.map((k) => k.id), null);
-      const loaded = await fetchOtherUserPreferences(userId);
+      const loaded = await fetchMostRecentComparisonUserPreferences(userId);
       if (cancelled) return;
       setOtherUserPrefs(loaded?.prefs ?? new Map());
+      setComparisonUnavailable(!loaded);
       setPrefsLoading(false);
     })();
     return () => {
@@ -342,6 +334,9 @@ export default function HomeScreen() {
             ? `Preferences saved to DB as ${currentUserId ?? 'anonymous user'}.`
             : 'Preferences saved.',
         );
+        const peer = await fetchMostRecentComparisonUserPreferences(currentUserId);
+        setOtherUserPrefs(peer?.prefs ?? new Map());
+        setComparisonUnavailable(!peer);
       } else {
         setSaveMessage('Save failed. Check console for Supabase error details.');
       }
@@ -411,34 +406,6 @@ export default function HomeScreen() {
         <ThemedText style={[styles.subheading, { color: palette.icon }]}>
           Left no · Right yes · Up get me in the mood first · Down maybe
         </ThemedText>
-        {DEV_HARDCODED_MODE ? (
-          <Pressable
-            style={[styles.switchButton, { borderColor: palette.tint }]}
-            onPress={async () => {
-              await supabase.auth.signOut();
-              const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
-              if (anonError || !anonData.user) {
-                setAuthMessage(
-                  anonError ? `Failed to switch test user: ${formatAuthError(anonError)}` : 'Failed to switch test user.',
-                );
-                return;
-              }
-              const newUserId = anonData.user.id;
-              await initializeUserKinkPreferences(newUserId, kinkCategories.map((k) => k.id), null);
-              const loaded = await fetchOtherUserPreferences(newUserId);
-              setCurrentUserId(newUserId);
-              setOtherUserPrefs(loaded?.prefs ?? new Map());
-              setIndex(0);
-              setSwipeResults([]);
-              setCompatibilityScore(null);
-              setHasSaved(false);
-              setSaveMessage(null);
-              setSwipesUsed(0);
-              setAuthMessage('Switched to another anonymous test user.');
-            }}>
-            <ThemedText>Switch test user</ThemedText>
-          </Pressable>
-        ) : null}
         {authMessage ? <ThemedText style={[styles.subheading, { color: palette.icon }]}>{authMessage}</ThemedText> : null}
         {currentUserId == null ? (
           <ThemedText style={[styles.subheading, { color: palette.icon }]}>Sign in to save preferences.</ThemedText>
@@ -454,7 +421,12 @@ export default function HomeScreen() {
             Swipes: {swipesUsed}/{SWIPE_LIMIT}
           </ThemedText>
         ) : null}
-        {currentUserId != null && !prefsLoading && current != null && compatibilityScore != null ? (
+        {currentUserId != null && !prefsLoading && current != null && comparisonUnavailable ? (
+          <ThemedText style={[styles.comparisonFallback, { color: palette.icon }]}>
+            No profiles available to compare yet
+          </ThemedText>
+        ) : null}
+        {currentUserId != null && !prefsLoading && current != null && !comparisonUnavailable && compatibilityScore != null ? (
           <ThemedText type="defaultSemiBold" style={[styles.compatibilityLive, { color: palette.tint }]}>
             Compatibility: {Math.round(compatibilityScore * 10) / 10}%
           </ThemedText>
@@ -472,7 +444,11 @@ export default function HomeScreen() {
           ) : current == null ? (
             <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
               <ThemedText type="title">You’re through the deck</ThemedText>
-              {compatibilityScore != null ? <ThemedText type="title">Compatibility: {Math.round(compatibilityScore * 10) / 10}%</ThemedText> : null}
+              {comparisonUnavailable ? (
+                <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>No profiles available to compare yet</ThemedText>
+              ) : compatibilityScore != null ? (
+                <ThemedText type="title">Compatibility: {Math.round(compatibilityScore * 10) / 10}%</ThemedText>
+              ) : null}
             </ThemedView>
           ) : atSwipeLimit ? (
             <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
@@ -553,9 +529,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: 20 },
   subheading: { fontSize: 14, marginBottom: 12 },
   compatibilityLive: { fontSize: 16, marginBottom: 8, textAlign: 'center' },
+  comparisonFallback: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
   swipeCount: { fontSize: 13, marginBottom: 4, textAlign: 'center' },
   limitBanner: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
-  switchButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 8 },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },
   cardInner: { flex: 1, borderRadius: 20, borderWidth: 2, padding: 24, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
