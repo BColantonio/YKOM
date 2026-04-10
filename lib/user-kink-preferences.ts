@@ -5,6 +5,22 @@ export type UserKinkPreference = {
   value: number | null;
 };
 
+/** Drops ids not present in `public.kinks` so upserts satisfy user_kink_preferences_kink_fk. */
+async function filterExistingKinkIds(kinkIds: number[]): Promise<number[]> {
+  const unique = [...new Set(kinkIds)];
+  if (unique.length === 0) return [];
+
+  const { data, error } = await supabase.from('kinks').select('id').in('id', unique);
+
+  if (error) {
+    console.error('filterExistingKinkIds:', error.message);
+    return [];
+  }
+
+  const found = new Set((data ?? []).map((r) => r.id as number));
+  return unique.filter((id) => found.has(id));
+}
+
 export async function getUserKinkPreferences(userId: string): Promise<Map<number, number | null>> {
   const { data, error } = await supabase
     .from('user_kink_preferences')
@@ -27,7 +43,14 @@ export async function getUserKinkPreferences(userId: string): Promise<Map<number
 export async function upsertUserKinkPreferences(userId: string, preferences: UserKinkPreference[]) {
   if (preferences.length === 0) return;
 
-  const payload = preferences.map((pref) => ({
+  const validIds = new Set(await filterExistingKinkIds(preferences.map((p) => p.kinkId)));
+  const filtered = preferences.filter((p) => validIds.has(p.kinkId));
+  if (filtered.length === 0) return;
+  if (filtered.length < preferences.length) {
+    console.warn('upsertUserKinkPreferences: skipping unknown kink ids');
+  }
+
+  const payload = filtered.map((pref) => ({
     user_id: userId,
     kink_id: pref.kinkId,
     value: pref.value,
@@ -48,7 +71,13 @@ export async function upsertUserKinkPreferences(userId: string, preferences: Use
 export async function initializeUserKinkPreferences(userId: string, kinkIds: number[], defaultValue: number | null = null) {
   if (kinkIds.length === 0) return;
 
-  const payload = kinkIds.map((kinkId) => ({
+  const valid = await filterExistingKinkIds(kinkIds);
+  if (valid.length === 0) return;
+  if (valid.length < kinkIds.length) {
+    console.warn('initializeUserKinkPreferences: skipping unknown kink ids');
+  }
+
+  const payload = valid.map((kinkId) => ({
     user_id: userId,
     kink_id: kinkId,
     value: defaultValue,

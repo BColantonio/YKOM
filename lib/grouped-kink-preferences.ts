@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getKinkLabelById } from '@/lib/local-kinks';
 
 export type GroupedKinkPreference = {
   kinkId: number;
@@ -11,20 +12,9 @@ export type GroupedKinkPreferencesByCategory = {
   kinks: GroupedKinkPreference[];
 };
 
-type KinkWithCategory = {
-  id: number;
-  name: string;
-  categories: { name: string } | { name: string }[] | null;
-};
+const PROFILE_CATEGORY = 'Your kinks';
 
-function categoryNameFromKinkRow(k: KinkWithCategory): string {
-  const c = k.categories;
-  if (c == null) return 'Uncategorized';
-  if (Array.isArray(c)) return c[0]?.name ?? 'Uncategorized';
-  return c.name ?? 'Uncategorized';
-}
-
-/** Loads `user_kink_preferences` joined with `kinks` and `categories`, grouped by category name. */
+/** Loads preferences from Supabase; kink names come from the local registry (no `kinks` table fetch). */
 export async function fetchUserPreferencesGroupedByCategory(
   userId: string,
 ): Promise<GroupedKinkPreferencesByCategory[]> {
@@ -39,50 +29,18 @@ export async function fetchUserPreferencesGroupedByCategory(
   }
   if (!prefRows?.length) return [];
 
-  const kinkIds = [...new Set(prefRows.map((r) => r.kink_id))];
-  const { data: kinkRows, error: kinkError } = await supabase
-    .from('kinks')
-    .select('id, name, categories(name)')
-    .in('id', kinkIds);
-
-  if (kinkError) {
-    console.error('Failed to fetch kinks:', kinkError.message);
-    return [];
-  }
-
-  const kinkById = new Map(
-    (kinkRows as KinkWithCategory[] | null)?.map((k) => [
-      k.id,
-      { name: k.name, categoryName: categoryNameFromKinkRow(k) },
-    ]) ?? [],
-  );
-
-  const grouped = new Map<string, GroupedKinkPreference[]>();
+  const kinks: GroupedKinkPreference[] = [];
   for (const row of prefRows) {
-    const meta = kinkById.get(row.kink_id);
-    if (!meta) continue;
-    const entry: GroupedKinkPreference = {
+    const name = getKinkLabelById(row.kink_id);
+    if (!name) continue;
+    kinks.push({
       kinkId: row.kink_id,
-      kinkName: meta.name,
+      kinkName: name,
       value: typeof row.value === 'number' ? row.value : null,
-    };
-    const list = grouped.get(meta.categoryName) ?? [];
-    list.push(entry);
-    grouped.set(meta.categoryName, list);
+    });
   }
 
-  for (const list of grouped.values()) {
-    list.sort((a, b) => a.kinkName.localeCompare(b.kinkName));
-  }
+  kinks.sort((a, b) => a.kinkName.localeCompare(b.kinkName));
 
-  const categoryNames = [...grouped.keys()].sort((a, b) => {
-    if (a === 'Uncategorized') return 1;
-    if (b === 'Uncategorized') return -1;
-    return a.localeCompare(b);
-  });
-
-  return categoryNames.map((categoryName) => ({
-    categoryName,
-    kinks: grouped.get(categoryName) ?? [],
-  }));
+  return [{ categoryName: PROFILE_CATEGORY, kinks }];
 }

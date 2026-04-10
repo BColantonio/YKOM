@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
@@ -9,17 +9,30 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getUnlockKinksForParentId, type DeckKink } from '@/lib/deck-unlock';
+import { formatAuthError } from '@/lib/format-auth-error';
+import { baseDeckCategories } from '@/lib/local-kinks';
 import { supabase } from '@/lib/supabase';
 import { SWIPE_LABELS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
+import { SWIPE_LIMIT } from '@/lib/swipe-limit';
 import { getUserKinkPreferences, initializeUserKinkPreferences, upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 
-type KinkCategory = { id: number; label: string };
+type KinkCategory = DeckKink;
 type KinkSwipeResult = { kinkId: number; value: number };
 type PreferenceValue = number | null;
 
 const DEV_HARDCODED_MODE = true;
 
-const KINK_LABELS = ['Bondage & restraint', 'Role play & fantasy', 'Sensory play', 'Power exchange (D/s)'];
+/**
+ * Local deck (not fetched from DB). Canonical export: {@link BASE_KINKS} from `@/lib/base-kinks`.
+ * ```
+ * { id: 1, name: 'bondage' },
+ * { id: 2, name: 'roleplay' },
+ * { id: 3, name: 'public play' },
+ * { id: 4, name: 'voyeurism' },
+ * ```
+ */
+export { BASE_KINKS } from '@/lib/base-kinks';
 function categoryCompatibility(a: number, b: number): number {
   const diff = Math.abs(a - b);
   return 100 - diff;
@@ -55,16 +68,6 @@ async function fetchOtherUserPreferences(excludeUserId: string) {
   return { userId: data.user_id, prefs: await getUserKinkPreferences(data.user_id) };
 }
 
-async function fetchDeckKinks(): Promise<KinkCategory[]> {
-  const { data, error } = await supabase.from('kinks').select('id,name').in('name', KINK_LABELS);
-  if (error) {
-    console.error('Failed to fetch deck kinks:', error.message);
-    return [];
-  }
-  const byName = new Map((data ?? []).map((row) => [row.name, row.id]));
-  return KINK_LABELS.map((label) => ({ id: byName.get(label) ?? -1, label })).filter((k) => k.id > 0);
-}
-
 function SwipeCard({
   kink,
   onSwipeComplete,
@@ -77,11 +80,13 @@ function SwipeCard({
   screenHeight,
   accent,
   muted,
+  gestureDisabled = false,
 }: {
   kink: KinkCategory;
   onSwipeComplete: (direction: SwipeDirection, kink: KinkCategory) => void;
   isTop: boolean;
   backScale: number;
+  gestureDisabled?: boolean;
   cardWidth: number;
   cardHeight: number;
   swipeThreshold: number;
@@ -102,7 +107,7 @@ function SwipeCard({
   );
 
   const pan = Gesture.Pan()
-    .enabled(isTop)
+    .enabled(isTop && !gestureDisabled)
     .onUpdate((e) => {
       x.value = e.translationX;
       y.value = e.translationY;
@@ -145,6 +150,11 @@ function SwipeCard({
     <GestureDetector gesture={pan}>
       <Animated.View style={[styles.card, { width: cardWidth, height: cardHeight, zIndex: isTop ? 2 : 1 }, cardStyle]}>
         <ThemedView style={[styles.cardInner, { borderColor: `${accent}55` }]}>
+          {kink.parentLabel ? (
+            <ThemedText style={[styles.cardParentLabel, { color: muted }]} numberOfLines={2}>
+              {kink.parentLabel}
+            </ThemedText>
+          ) : null}
           <ThemedText type="title" style={styles.cardTitle}>
             {kink.label}
           </ThemedText>
@@ -187,33 +197,69 @@ export default function HomeScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [swipesUsed, setSwipesUsed] = useState(0);
+  const [unlockToast, setUnlockToast] = useState<{ count: number } | null>(null);
+  const unlockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deckRef = useRef<KinkCategory[]>([]);
+  useEffect(() => {
+    deckRef.current = kinkCategories;
+  }, [kinkCategories]);
+
+  const showUnlockToast = useCallback((count: number) => {
+    if (unlockToastTimerRef.current) {
+      clearTimeout(unlockToastTimerRef.current);
+      unlockToastTimerRef.current = null;
+    }
+    setUnlockToast({ count });
+    unlockToastTimerRef.current = setTimeout(() => {
+      setUnlockToast(null);
+      unlockToastTimerRef.current = null;
+    }, 2600);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (unlockToastTimerRef.current) clearTimeout(unlockToastTimerRef.current);
+    };
+  }, []);
+
+  const atSwipeLimit = swipesUsed >= SWIPE_LIMIT;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setPrefsLoading(true);
-      const deck = await fetchDeckKinks();
-      setKinkCategories(deck);
+      const deck = baseDeckCategories();
+      if (!cancelled) setKinkCategories(deck);
       if (deck.length === 0) {
-        setAuthMessage('No matching kinks found in database for current deck labels.');
+        setAuthMessage('No kinks defined in the local deck.');
         setPrefsLoading(false);
         return;
       }
       if (DEV_HARDCODED_MODE) {
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         if (sessionError && sessionError.message !== 'Auth session missing!') {
-          console.error('Failed to get current Supabase session:', sessionError.message);
+          console.error('Failed to get current Supabase session:', formatAuthError(sessionError));
         }
         let user = sessionData.session?.user ?? null;
+        let anonError: unknown = null;
         if (!user) {
-          const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
-          if (anonError) {
-            console.error('Anonymous sign-in failed:', anonError.message);
+          const anon = await supabase.auth.signInAnonymously();
+          anonError = anon.error;
+          if (anon.error) {
+            console.error('Anonymous sign-in failed:', formatAuthError(anon.error));
           }
-          user = anonData.user ?? null;
+          user = anon.data.user ?? null;
         }
         if (!user) {
-          if (!cancelled) setPrefsLoading(false);
+          if (!cancelled) {
+            setAuthMessage(
+              anonError
+                ? `Anonymous sign-in failed: ${formatAuthError(anonError)}`
+                : 'Anonymous sign-in did not return a user. Try again.',
+            );
+            setPrefsLoading(false);
+          }
           return;
         }
         setCurrentUserId(user.id);
@@ -226,24 +272,33 @@ export default function HomeScreen() {
       }
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError && sessionError.message !== 'Auth session missing!') {
-        console.error('Failed to get current Supabase session:', sessionError.message);
+        console.error('Failed to get current Supabase session:', formatAuthError(sessionError));
       }
 
       let user = sessionData.session?.user ?? null;
+      let lastAnonError: unknown = null;
       if (!user) {
         const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+        lastAnonError = anonError ?? null;
         if (anonError) {
-          if (anonError.message === 'Anonymous sign-ins are disabled') {
+          const msg = formatAuthError(anonError);
+          if (msg.toLowerCase().includes('anonymous sign-ins are disabled')) {
             setAuthMessage('Enable anonymous auth in Supabase or sign in with a user account.');
           } else {
-            console.error('Anonymous sign-in failed:', anonError.message);
+            console.error('Anonymous sign-in failed:', msg);
+            setAuthMessage(`Sign-in failed: ${msg}`);
           }
         }
         user = anonData.user ?? null;
       }
 
       if (!user) {
-        if (!cancelled) setPrefsLoading(false);
+        if (!cancelled) {
+          if (!lastAnonError) {
+            setAuthMessage('Could not establish a session. Check network and Supabase settings.');
+          }
+          setPrefsLoading(false);
+        }
         return;
       }
 
@@ -294,10 +349,39 @@ export default function HomeScreen() {
     setCompatibilityScore(score);
   }, [swipeResults, otherUserPrefs, kinkCategories]);
 
-  const onSwipeComplete = useCallback((direction: SwipeDirection, kink: KinkCategory) => {
-    setSwipeResults((prev) => [...prev, { kinkId: kink.id, value: SWIPE_VALUES[direction] }]);
-    setIndex((i) => i + 1);
-  }, []);
+  const onSwipeComplete = useCallback(
+    (direction: SwipeDirection, kink: KinkCategory) => {
+      if (swipesUsed >= SWIPE_LIMIT) return;
+      const value = SWIPE_VALUES[direction];
+
+      let fetched: DeckKink[] = [];
+      if (value === 67 || value === 100) {
+        fetched = getUnlockKinksForParentId(kink.id);
+      }
+
+      const prev = deckRef.current;
+      const pos = prev.findIndex((k) => k.id === kink.id);
+      const ids = new Set(prev.map((k) => k.id));
+      const unique = fetched.filter((u) => !ids.has(u.id));
+      if (unique.length > 0 && pos >= 0) {
+        const nextDeck = [...prev.slice(0, pos + 1), ...unique, ...prev.slice(pos + 1)];
+        setKinkCategories(nextDeck);
+        showUnlockToast(unique.length);
+        if (currentUserId) {
+          void initializeUserKinkPreferences(
+            currentUserId,
+            unique.map((k) => k.id),
+            null,
+          );
+        }
+      }
+
+      setSwipeResults((p) => [...p, { kinkId: kink.id, value }]);
+      setIndex((i) => i + 1);
+      setSwipesUsed((n) => n + 1);
+    },
+    [swipesUsed, currentUserId, showUnlockToast],
+  );
 
   const current = kinkCategories[index];
   const next = kinkCategories[index + 1];
@@ -316,7 +400,9 @@ export default function HomeScreen() {
               await supabase.auth.signOut();
               const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
               if (anonError || !anonData.user) {
-                setAuthMessage('Failed to switch test user.');
+                setAuthMessage(
+                  anonError ? `Failed to switch test user: ${formatAuthError(anonError)}` : 'Failed to switch test user.',
+                );
                 return;
               }
               const newUserId = anonData.user.id;
@@ -329,6 +415,7 @@ export default function HomeScreen() {
               setCompatibilityScore(null);
               setHasSaved(false);
               setSaveMessage(null);
+              setSwipesUsed(0);
               setAuthMessage('Switched to another anonymous test user.');
             }}>
             <ThemedText>Switch test user</ThemedText>
@@ -339,6 +426,16 @@ export default function HomeScreen() {
           <ThemedText style={[styles.subheading, { color: palette.icon }]}>Sign in to save preferences.</ThemedText>
         ) : null}
         {saveMessage ? <ThemedText style={[styles.subheading, { color: palette.icon }]}>{saveMessage}</ThemedText> : null}
+        {currentUserId != null && !prefsLoading && atSwipeLimit && current != null ? (
+          <ThemedText style={[styles.limitBanner, { color: palette.icon }]}>
+            You&apos;ve reached your swipe limit. Upgrade for unlimited swipes.
+          </ThemedText>
+        ) : null}
+        {currentUserId != null && !prefsLoading && current != null && !atSwipeLimit ? (
+          <ThemedText style={[styles.swipeCount, { color: palette.icon }]}>
+            Swipes: {swipesUsed}/{SWIPE_LIMIT}
+          </ThemedText>
+        ) : null}
         {currentUserId != null && !prefsLoading && current != null && compatibilityScore != null ? (
           <ThemedText type="defaultSemiBold" style={[styles.compatibilityLive, { color: palette.tint }]}>
             Compatibility: {Math.round(compatibilityScore * 10) / 10}%
@@ -359,6 +456,13 @@ export default function HomeScreen() {
               <ThemedText type="title">You’re through the deck</ThemedText>
               {compatibilityScore != null ? <ThemedText type="title">Compatibility: {Math.round(compatibilityScore * 10) / 10}%</ThemedText> : null}
             </ThemedView>
+          ) : atSwipeLimit ? (
+            <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
+              <ThemedText type="title">Swipe limit reached</ThemedText>
+              <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>
+                You&apos;ve reached your swipe limit. Upgrade for unlimited swipes.
+              </ThemedText>
+            </ThemedView>
           ) : (
             <>
               {next ? (
@@ -367,6 +471,7 @@ export default function HomeScreen() {
                   kink={next}
                   onSwipeComplete={() => {}}
                   isTop={false}
+                  gestureDisabled={false}
                   backScale={0.96}
                   cardWidth={cardWidth}
                   cardHeight={cardHeight}
@@ -382,6 +487,7 @@ export default function HomeScreen() {
                 kink={current}
                 onSwipeComplete={onSwipeComplete}
                 isTop={true}
+                gestureDisabled={atSwipeLimit}
                 backScale={1}
                 cardWidth={cardWidth}
                 cardHeight={cardHeight}
@@ -395,6 +501,31 @@ export default function HomeScreen() {
           )}
         </View>
       </ThemedView>
+      {unlockToast != null ? (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            styles.unlockToastOverlay,
+            { paddingBottom: Math.max(insets.bottom, 8) + 4 },
+          ]}>
+          <View
+            style={[
+              styles.unlockToastInner,
+              {
+                backgroundColor: colorScheme === 'dark' ? 'rgba(40,40,44,0.94)' : 'rgba(28,28,30,0.94)',
+                borderColor: `${palette.tint}44`,
+              },
+            ]}>
+            <ThemedText style={styles.unlockToastTitle} lightColor="#fff" darkColor="#f5f5f7">
+              New kinks unlocked 🔓
+            </ThemedText>
+            <ThemedText style={styles.unlockToastSubtitle} lightColor="rgba(255,255,255,0.82)" darkColor="rgba(245,245,247,0.82)">
+              {unlockToast.count} new {unlockToast.count === 1 ? 'item' : 'items'} added
+            </ThemedText>
+          </View>
+        </View>
+      ) : null}
     </GestureHandlerRootView>
   );
 }
@@ -404,10 +535,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: 20 },
   subheading: { fontSize: 14, marginBottom: 12 },
   compatibilityLive: { fontSize: 16, marginBottom: 8, textAlign: 'center' },
+  swipeCount: { fontSize: 13, marginBottom: 4, textAlign: 'center' },
+  limitBanner: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
   switchButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start', marginBottom: 8 },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },
   cardInner: { flex: 1, borderRadius: 20, borderWidth: 2, padding: 24, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  cardParentLabel: { fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 6, opacity: 0.92 },
   cardTitle: { textAlign: 'center', marginBottom: 12 },
   cardHint: { fontSize: 14 },
   stamp: { position: 'absolute', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
@@ -417,4 +551,23 @@ const styles = StyleSheet.create({
   stampTop: { top: 20, alignSelf: 'center', borderColor: '#6a1b9a' },
   stampBottom: { bottom: 20, alignSelf: 'center', borderColor: '#ef6c00' },
   empty: { borderRadius: 20, borderWidth: 2, padding: 28, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  unlockToastOverlay: {
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    zIndex: 100,
+    elevation: 100,
+  },
+  unlockToastInner: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 400,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  unlockToastTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  unlockToastSubtitle: { fontSize: 13, textAlign: 'center' },
 });
