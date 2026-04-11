@@ -24,26 +24,16 @@ import { rootKinksToDeck } from '@/lib/kinks';
 import { supabase } from '@/lib/supabase';
 import { SWIPE_LABELS, SWIPE_STAMP_COLORS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
 import { SWIPE_LIMIT } from '@/lib/swipe-limit';
-import {
-  fetchMostRecentComparisonUserPreferences,
-  initializeUserKinkPreferences,
-  upsertUserKinkPreferences,
-} from '@/lib/user-kink-preferences';
+import { initializeUserKinkPreferences, upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 
 /** Swipe card model; `description` powers tap-to-expand copy from `public.kinks`. */
 type KinkCategory = DeckKink;
 type KinkSwipeResult = { kinkId: number; value: number };
-type PreferenceValue = number | null;
 
 const DEV_HARDCODED_MODE = true;
 
 /** Max height of the description panel when fully expanded (animated open). */
 const DESCRIPTION_PANEL_MAX = 200;
-
-function categoryCompatibility(a: number, b: number): number {
-  const diff = Math.abs(a - b);
-  return 100 - diff;
-}
 
 function shuffleArray<T>(items: T[]): T[] {
   const a = [...items];
@@ -52,20 +42,6 @@ function shuffleArray<T>(items: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
-}
-
-function overallCompatibility(categories: KinkCategory[], aPrefs: Map<number, PreferenceValue>, bPrefs: Map<number, PreferenceValue>) {
-  let sum = 0;
-  let comparableCount = 0;
-  for (const kink of categories) {
-    const a = aPrefs.get(kink.id);
-    const b = bPrefs.get(kink.id);
-    if (a == null || b == null) continue;
-    sum += categoryCompatibility(a, b);
-    comparableCount += 1;
-  }
-  if (comparableCount === 0) return null;
-  return sum / comparableCount;
 }
 
 function SwipeCard({
@@ -294,10 +270,6 @@ export default function HomeScreen() {
   const [swipeResults, setSwipeResults] = useState<KinkSwipeResult[]>([]);
   const [kinkCategories, setKinkCategories] = useState<KinkCategory[]>([]);
   const [prefsLoading, setPrefsLoading] = useState(true);
-  const [otherUserPrefs, setOtherUserPrefs] = useState<Map<number, PreferenceValue>>(new Map());
-  /** True after load when no other user had preferences to compare against. */
-  const [comparisonUnavailable, setComparisonUnavailable] = useState(false);
-  const [compatibilityScore, setCompatibilityScore] = useState<number | null>(null);
   const [hasSaved, setHasSaved] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -375,9 +347,6 @@ export default function HomeScreen() {
         }
         setCurrentUserId(user.id);
         await initializeUserKinkPreferences(user.id, initialDeck.map((k) => k.id), null);
-        const loaded = await fetchMostRecentComparisonUserPreferences(user.id);
-        setOtherUserPrefs(loaded?.prefs ?? new Map());
-        setComparisonUnavailable(!loaded);
         setAuthMessage('Dev mode: anonymous session.');
         setPrefsLoading(false);
         return;
@@ -418,10 +387,7 @@ export default function HomeScreen() {
       setCurrentUserId(userId);
       setAuthMessage(null);
       await initializeUserKinkPreferences(userId, initialDeck.map((k) => k.id), null);
-      const loaded = await fetchMostRecentComparisonUserPreferences(userId);
       if (cancelled) return;
-      setOtherUserPrefs(loaded?.prefs ?? new Map());
-      setComparisonUnavailable(!loaded);
       setPrefsLoading(false);
     })();
     return () => {
@@ -446,24 +412,11 @@ export default function HomeScreen() {
             ? `Preferences saved to DB as ${currentUserId ?? 'anonymous user'}.`
             : 'Preferences saved.',
         );
-        const peer = await fetchMostRecentComparisonUserPreferences(currentUserId);
-        setOtherUserPrefs(peer?.prefs ?? new Map());
-        setComparisonUnavailable(!peer);
       } else {
         setSaveMessage('Save failed. Check console for Supabase error details.');
       }
     })();
   }, [index, swipeResults, hasSaved, currentUserId, kinkCategories]);
-
-  useEffect(() => {
-    if (kinkCategories.length === 0) return;
-    const myPrefs = new Map<number, PreferenceValue>();
-    for (const kink of kinkCategories) {
-      myPrefs.set(kink.id, swipeResults.find((r) => r.kinkId === kink.id)?.value ?? null);
-    }
-    const score = overallCompatibility(kinkCategories, myPrefs, otherUserPrefs);
-    setCompatibilityScore(score);
-  }, [swipeResults, otherUserPrefs, kinkCategories]);
 
   const onSwipeComplete = useCallback(
     (direction: SwipeDirection, kink: KinkCategory) => {
@@ -528,21 +481,6 @@ export default function HomeScreen() {
             You&apos;ve reached your swipe limit. Upgrade for unlimited swipes.
           </ThemedText>
         ) : null}
-        {currentUserId != null && !prefsLoading && current != null && !atSwipeLimit ? (
-          <ThemedText style={[styles.swipeCount, { color: palette.icon }]}>
-            Swipes: {swipesUsed}/{SWIPE_LIMIT}
-          </ThemedText>
-        ) : null}
-        {currentUserId != null && !prefsLoading && current != null && comparisonUnavailable ? (
-          <ThemedText style={[styles.comparisonFallback, { color: palette.icon }]}>
-            No profiles available to compare yet
-          </ThemedText>
-        ) : null}
-        {currentUserId != null && !prefsLoading && current != null && !comparisonUnavailable && compatibilityScore != null ? (
-          <ThemedText type="defaultSemiBold" style={[styles.compatibilityLive, { color: palette.tint }]}>
-            Compatibility: {Math.round(compatibilityScore * 10) / 10}%
-          </ThemedText>
-        ) : null}
         <View style={styles.deck}>
           {prefsLoading || kinksLoading ? (
             <ActivityIndicator size="large" color={palette.tint} />
@@ -558,11 +496,6 @@ export default function HomeScreen() {
             <ThemedView
               style={[styles.empty, { width: cardWidth, minHeight: cardHeight, borderColor: `${palette.tint}44` }]}>
               <ThemedText type="title">You’re through the deck</ThemedText>
-              {comparisonUnavailable ? (
-                <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>No profiles available to compare yet</ThemedText>
-              ) : compatibilityScore != null ? (
-                <ThemedText type="title">Compatibility: {Math.round(compatibilityScore * 10) / 10}%</ThemedText>
-              ) : null}
             </ThemedView>
           ) : atSwipeLimit ? (
             <ThemedView
@@ -643,9 +576,6 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 20 },
   subheading: { fontSize: 14, marginBottom: 12 },
-  compatibilityLive: { fontSize: 16, marginBottom: 8, textAlign: 'center' },
-  comparisonFallback: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
-  swipeCount: { fontSize: 13, marginBottom: 4, textAlign: 'center' },
   limitBanner: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },

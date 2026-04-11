@@ -29,9 +29,11 @@ import {
   fetchUserPreferencesGroupedByCategory,
   type GroupedKinkPreference,
   type GroupedKinkPreferencesByCategory,
+  type ProfileKinkRow,
 } from '@/lib/grouped-kink-preferences';
 import {
   EDIT_OPTIONS,
+  KINK_VALUE,
   preferenceValueToShortLabel,
   type StoredPreferenceValue,
 } from '@/lib/kink-preference-values';
@@ -47,15 +49,86 @@ function placeholderCompatibilityForRow(index: number): PlaceholderCompatibility
   return presets[index % presets.length] ?? { label: '––%', badgeColor: '#888888' };
 }
 
+function ProfileKinkPreferenceRow({
+  k,
+  palette,
+  savedFlashKinkId,
+  onEdit,
+  sub = false,
+}: {
+  k: GroupedKinkPreference;
+  palette: typeof Colors.light;
+  savedFlashKinkId: number | null;
+  onEdit: (pref: GroupedKinkPreference) => void;
+  sub?: boolean;
+}) {
+  const isFlash = savedFlashKinkId === k.kinkId;
+  return (
+    <Pressable
+      style={[
+        styles.kinkRow,
+        sub && styles.kinkRowSub,
+        sub && { borderLeftColor: palette.tint + '55' },
+        isFlash && {
+          backgroundColor: palette.tint + '26',
+          borderRadius: 8,
+          marginHorizontal: -6,
+          paddingHorizontal: 6,
+        },
+      ]}
+      onPress={() => onEdit(k)}
+      accessibilityRole="button">
+      <ThemedText style={styles.kinkName} numberOfLines={2}>
+        {k.kinkName}
+      </ThemedText>
+      <View style={styles.kinkRowRight}>
+        {isFlash ? <ThemedText style={[styles.savedHint, { color: palette.icon }]}>Saved</ThemedText> : null}
+        <ThemedText type="defaultSemiBold" style={{ color: palette.tint }}>
+          {preferenceValueToShortLabel(k.value)}
+        </ThemedText>
+      </View>
+    </Pressable>
+  );
+}
+
+/** Parent row’s stored preference for that deck parent id, if any (`null` = no row / not set). */
+function getParentDeckPreferenceValue(
+  sections: GroupedKinkPreferencesByCategory[],
+  parentId: number,
+): number | null | undefined {
+  for (const section of sections) {
+    for (const row of section.rows) {
+      if (row.kind === 'parent' && row.parentId === parentId) {
+        return row.parentPreference?.value ?? null;
+      }
+    }
+  }
+  return undefined;
+}
+
 function preferencesWithCompletedSwipesOnly(
   sections: GroupedKinkPreferencesByCategory[],
 ): GroupedKinkPreferencesByCategory[] {
   return sections
-    .map((section) => ({
-      ...section,
-      kinks: section.kinks.filter((k) => k.value != null),
-    }))
-    .filter((section) => section.kinks.length > 0);
+    .map((section) => {
+      const rows: ProfileKinkRow[] = [];
+      for (const row of section.rows) {
+        if (row.kind === 'leaf') {
+          if (row.pref.value != null) rows.push(row);
+          continue;
+        }
+        const pp = row.parentPreference?.value != null ? row.parentPreference : null;
+        const children = row.children.filter((c) => c.value != null);
+        if (pp == null && children.length === 0) continue;
+        rows.push({
+          ...row,
+          parentPreference: pp,
+          children,
+        });
+      }
+      return { ...section, rows };
+    })
+    .filter((section) => section.rows.length > 0);
 }
 
 export default function ProfileScreen() {
@@ -93,12 +166,13 @@ export default function ProfileScreen() {
     [],
   );
 
-  const loadPreferences = useCallback(async () => {
+  const loadPreferences = useCallback(async (opts?: { silent?: boolean }) => {
     if (!userId || kinksLoading) return;
-    setPrefsLoading(true);
+    const silent = opts?.silent === true;
+    if (!silent) setPrefsLoading(true);
     const data = await fetchUserPreferencesGroupedByCategory(userId, kinks);
     setGrouped(preferencesWithCompletedSwipesOnly(data));
-    setPrefsLoading(false);
+    if (!silent) setPrefsLoading(false);
   }, [userId, kinks, kinksLoading]);
 
   useEffect(() => {
@@ -117,7 +191,20 @@ export default function ProfileScreen() {
     setGrouped((prev) =>
       prev.map((g) => ({
         ...g,
-        kinks: g.kinks.map((k) => (k.kinkId === kinkId ? { ...k, value } : k)),
+        rows: g.rows.map((row) => {
+          if (row.kind === 'leaf') {
+            if (row.pref.kinkId !== kinkId) return row;
+            return { ...row, pref: { ...row.pref, value } };
+          }
+          let parentPreference = row.parentPreference;
+          if (parentPreference?.kinkId === kinkId) {
+            parentPreference = { ...parentPreference, value };
+          }
+          const children = row.children.map((c) =>
+            c.kinkId === kinkId ? { ...c, value } : c,
+          );
+          return { ...row, parentPreference, children };
+        }),
       })),
     );
   }, []);
@@ -126,15 +213,35 @@ export default function ProfileScreen() {
     async (value: number) => {
       if (!userId || !editing) return;
       const kinkId = editing.kinkId;
-      const ok = await upsertUserKinkPreferences(userId, [{ kinkId, value }]);
+      const childIds =
+        value === KINK_VALUE.no ? kinks.filter((k) => k.parent_id === kinkId).map((k) => k.id) : [];
+
+      const payload: { kinkId: number; value: number }[] = [{ kinkId, value }];
+      for (const id of childIds) {
+        payload.push({ kinkId: id, value: KINK_VALUE.no });
+      }
+
+      const parentId = kinks.find((k) => k.id === kinkId)?.parent_id ?? null;
+      if (parentId != null) {
+        const parentVal = getParentDeckPreferenceValue(grouped, parentId);
+        if (parentVal === KINK_VALUE.no) {
+          payload.push({ kinkId: parentId, value });
+        }
+      }
+
+      const ok = await upsertUserKinkPreferences(userId, payload);
       setEditing(null);
       if (ok) {
-        updateKinkLocal(kinkId, value);
+        if (payload.length > 1) {
+          void loadPreferences({ silent: true });
+        } else {
+          updateKinkLocal(kinkId, value);
+        }
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         flashSaveFeedback(kinkId);
       }
     },
-    [userId, editing, updateKinkLocal, flashSaveFeedback],
+    [userId, editing, kinks, grouped, loadPreferences, updateKinkLocal, flashSaveFeedback],
   );
 
   const onSaveUsername = useCallback(async () => {
@@ -228,34 +335,63 @@ export default function ProfileScreen() {
         ) : (
           grouped.map((section) => (
             <Collapsible key={section.categoryName} title={section.categoryName}>
-              {section.kinks.map((k) => {
-                const isFlash = savedFlashKinkId === k.kinkId;
-                return (
-                  <Pressable
-                    key={k.kinkId}
-                    style={[
-                      styles.kinkRow,
-                      isFlash && {
-                        backgroundColor: palette.tint + '26',
-                        borderRadius: 8,
-                        marginHorizontal: -6,
-                        paddingHorizontal: 6,
-                      },
-                    ]}
-                    onPress={() => setEditing(k)}
-                    accessibilityRole="button">
-                    <ThemedText style={styles.kinkName} numberOfLines={2}>
-                      {k.kinkName}
-                    </ThemedText>
-                    <View style={styles.kinkRowRight}>
-                      {isFlash ? (
-                        <ThemedText style={[styles.savedHint, { color: palette.icon }]}>Saved</ThemedText>
-                      ) : null}
-                      <ThemedText type="defaultSemiBold" style={{ color: palette.tint }}>
-                        {preferenceValueToShortLabel(k.value)}
+              {section.rows.map((row) => {
+                if (row.kind === 'leaf') {
+                  const k = row.pref;
+                  const isFlash = savedFlashKinkId === k.kinkId;
+                  return (
+                    <Pressable
+                      key={k.kinkId}
+                      style={[
+                        styles.kinkRow,
+                        isFlash && {
+                          backgroundColor: palette.tint + '26',
+                          borderRadius: 8,
+                          marginHorizontal: -6,
+                          paddingHorizontal: 6,
+                        },
+                      ]}
+                      onPress={() => setEditing(k)}
+                      accessibilityRole="button">
+                      <ThemedText style={styles.kinkName} numberOfLines={2}>
+                        {k.kinkName}
                       </ThemedText>
-                    </View>
-                  </Pressable>
+                      <View style={styles.kinkRowRight}>
+                        {isFlash ? (
+                          <ThemedText style={[styles.savedHint, { color: palette.icon }]}>Saved</ThemedText>
+                        ) : null}
+                        <ThemedText type="defaultSemiBold" style={{ color: palette.tint }}>
+                          {preferenceValueToShortLabel(k.value)}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+                  );
+                }
+                return (
+                  <Collapsible
+                    key={`parent-${row.parentId}`}
+                    title={row.parentName}
+                    contentStyle={styles.profileNestedCollapsibleContent}
+                    headingStyle={styles.profileNestedCollapsibleHeading}>
+                    {row.parentPreference ? (
+                      <ProfileKinkPreferenceRow
+                        k={row.parentPreference}
+                        palette={palette}
+                        savedFlashKinkId={savedFlashKinkId}
+                        onEdit={setEditing}
+                      />
+                    ) : null}
+                    {row.children.map((k) => (
+                      <ProfileKinkPreferenceRow
+                        key={k.kinkId}
+                        k={k}
+                        palette={palette}
+                        savedFlashKinkId={savedFlashKinkId}
+                        onEdit={setEditing}
+                        sub
+                      />
+                    ))}
+                  </Collapsible>
                 );
               })}
             </Collapsible>
@@ -393,6 +529,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#8884',
+  },
+  kinkRowSub: {
+    marginLeft: 4,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: 'transparent',
+  },
+  profileNestedCollapsibleHeading: {
+    paddingVertical: 2,
+  },
+  profileNestedCollapsibleContent: {
+    marginTop: 2,
+    paddingBottom: 4,
+    gap: 0,
   },
   kinkName: { flex: 1 },
   kinkRowRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
