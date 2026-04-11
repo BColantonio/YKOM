@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 
-import { fetchFollowsForFollower, type FollowListRow } from '@/lib/follows';
+import { fetchMyFollows, type FollowListRow } from '@/lib/follows';
 
 export function useFollows(followerId: string | null) {
   const [follows, setFollows] = useState<FollowListRow[]>([]);
@@ -13,7 +13,7 @@ export function useFollows(followerId: string | null) {
       return;
     }
     setLoading(true);
-    const rows = await fetchFollowsForFollower(followerId);
+    const rows = await fetchMyFollows(followerId);
     setFollows(rows);
     setLoading(false);
   }, [followerId]);

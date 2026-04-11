@@ -1,12 +1,16 @@
 import * as Haptics from 'expo-haptics';
-import { useFocusEffect } from 'expo-router';
+import { Image } from 'expo-image';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,9 +20,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Collapsible } from '@/components/ui/collapsible';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useFollows } from '@/hooks/use-follows';
-import { ensureSignedInUserId } from '@/lib/auth-session';
+import { updateProfileUsername } from '@/lib/profiles';
 import {
   fetchUserPreferencesGroupedByCategory,
   type GroupedKinkPreference,
@@ -34,11 +39,11 @@ import { upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 /** Profile lists only kinks the user has committed (saved value: 0, 33, 67, or 100). */
 function placeholderCompatibilityForRow(index: number): PlaceholderCompatibility {
   const presets: PlaceholderCompatibility[] = [
-    { label: '92%', dotColor: '#2e7d32' },
-    { label: '78%', dotColor: '#f9a825' },
-    { label: '64%', dotColor: '#c62828' },
+    { label: '92%', badgeColor: '#2e7d32' },
+    { label: '76%', badgeColor: '#f9a825' },
+    { label: '45%', badgeColor: '#e65100' },
   ];
-  return presets[index % presets.length] ?? { label: '––%', dotColor: '#888888' };
+  return presets[index % presets.length] ?? { label: '––%', badgeColor: '#888888' };
 }
 
 function preferencesWithCompletedSwipesOnly(
@@ -56,12 +61,17 @@ export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { user, profile, initialized, profileLoading, refreshProfile, signOut } = useAuth();
 
-  const [userId, setUserId] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const userId = user?.id ?? null;
+  const authLoading = !initialized;
+
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [grouped, setGrouped] = useState<GroupedKinkPreferencesByCategory[]>([]);
   const [editing, setEditing] = useState<GroupedKinkPreference | null>(null);
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState('');
   const [savedFlashKinkId, setSavedFlashKinkId] = useState<number | null>(null);
   const saveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -80,21 +90,6 @@ export default function ProfileScreen() {
     },
     [],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      setAuthLoading(true);
-      const id = await ensureSignedInUserId();
-      if (!cancelled) {
-        setUserId(id);
-        setAuthLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const loadPreferences = useCallback(async () => {
     if (!userId) return;
@@ -140,6 +135,27 @@ export default function ProfileScreen() {
     [userId, editing, updateKinkLocal, flashSaveFeedback],
   );
 
+  const onSaveUsername = useCallback(async () => {
+    if (!userId) return;
+    const ok = await updateProfileUsername(userId, usernameDraft);
+    setProfileEditOpen(false);
+    if (ok) {
+      void refreshProfile();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      Alert.alert('Couldn’t update username', 'Try a different name — it might already be taken.');
+    }
+  }, [userId, usernameDraft, refreshProfile]);
+
+  const onSignOut = useCallback(async () => {
+    await signOut();
+    router.replace('/(auth)');
+  }, [signOut, router]);
+
+  const displayName =
+    profile?.username ?? user?.user_metadata?.username ?? user?.email?.split('@')[0] ?? 'Explorer';
+  const isGuest = user?.is_anonymous === true;
+
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -148,17 +164,35 @@ export default function ProfileScreen() {
         </ThemedText>
 
         <View style={styles.headerBlock}>
-          <View style={[styles.avatar, { backgroundColor: palette.icon + '33' }]} />
+          {profile?.avatar_url ? (
+            <Image
+              source={{ uri: profile.avatar_url }}
+              style={styles.avatar}
+              contentFit="cover"
+              transition={200}
+            />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: palette.icon + '33' }]} />
+          )}
           <ThemedText type="subtitle" style={styles.username}>
-            username
+            {profileLoading ? '…' : displayName}
           </ThemedText>
-          <ThemedText style={[styles.bio, { color: palette.icon }]}>
-            Short bio goes here. Tap Edit Profile to change this later.
-          </ThemedText>
+          {isGuest ? (
+            <ThemedText style={[styles.bio, { color: palette.icon }]}>
+              You&apos;re browsing as a guest — swipe away, or create an account to save your vibe across devices.
+            </ThemedText>
+          ) : (
+            <ThemedText style={[styles.bio, { color: palette.icon }]}>
+              {user?.email ?? 'Signed in'} · Tap Edit to rename your playful handle.
+            </ThemedText>
+          )}
           <View style={styles.buttonRow}>
             <Pressable
               style={[styles.outlineButton, { borderColor: palette.tint }]}
-              onPress={() => {}}
+              onPress={() => {
+                setUsernameDraft(profile?.username ?? displayName);
+                setProfileEditOpen(true);
+              }}
               accessibilityRole="button">
               <ThemedText type="defaultSemiBold">Edit Profile</ThemedText>
             </Pressable>
@@ -167,6 +201,12 @@ export default function ProfileScreen() {
               onPress={() => {}}
               accessibilityRole="button">
               <ThemedText type="defaultSemiBold">Share Profile</ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.outlineButton, { borderColor: palette.icon + '88' }]}
+              onPress={() => void onSignOut()}
+              accessibilityRole="button">
+              <ThemedText type="defaultSemiBold">Sign out</ThemedText>
             </Pressable>
           </View>
         </View>
@@ -223,6 +263,9 @@ export default function ProfileScreen() {
         <ThemedText type="subtitle" style={styles.sectionTitle}>
           Your People
         </ThemedText>
+        <ThemedText style={[styles.yourPeopleSubtitle, { color: palette.icon }]}>
+          People you follow • See how your kinks match
+        </ThemedText>
 
         {authLoading ? null : userId == null ? (
           <ThemedText style={{ color: palette.icon }}>Sign in to see people you follow.</ThemedText>
@@ -235,9 +278,11 @@ export default function ProfileScreen() {
             </ThemedText>
             <Pressable
               style={[styles.outlineButton, styles.followMoreButton, { borderColor: palette.tint }]}
-              onPress={() => {}}
+              onPress={() => {
+                console.log('Navigate to discover');
+              }}
               accessibilityRole="button">
-              <ThemedText type="defaultSemiBold">+ Follow more people</ThemedText>
+              <ThemedText type="defaultSemiBold">Discover people</ThemedText>
             </Pressable>
           </ThemedView>
         ) : (
@@ -251,6 +296,38 @@ export default function ProfileScreen() {
           ))
         )}
       </ScrollView>
+
+      <Modal visible={profileEditOpen} transparent animationType="fade" onRequestClose={() => setProfileEditOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setProfileEditOpen(false)}>
+          <Pressable
+            style={[styles.modalCard, { borderColor: palette.icon + '44', backgroundColor: palette.background }]}
+            onPress={(e) => e.stopPropagation()}>
+            <ThemedText type="defaultSemiBold" style={styles.modalTitle}>
+              Username
+            </ThemedText>
+            <TextInput
+              value={usernameDraft}
+              onChangeText={setUsernameDraft}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="curious_kitten"
+              placeholderTextColor={palette.icon}
+              style={[
+                styles.usernameInput,
+                { color: palette.text, borderColor: palette.icon + '55', backgroundColor: palette.background },
+              ]}
+            />
+            <Pressable style={styles.modalOption} onPress={() => void onSaveUsername()}>
+              <ThemedText type="defaultSemiBold" style={{ color: palette.tint }}>
+                Save
+              </ThemedText>
+            </Pressable>
+            <Pressable style={styles.modalCancel} onPress={() => setProfileEditOpen(false)}>
+              <ThemedText style={{ color: palette.icon }}>Cancel</ThemedText>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={editing != null} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setEditing(null)}>
@@ -286,7 +363,15 @@ const styles = StyleSheet.create({
   avatar: { width: 80, height: 80, borderRadius: 40, alignSelf: 'center' },
   username: { textAlign: 'center' },
   bio: { textAlign: 'center', fontSize: 14, lineHeight: 20 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 4 },
+  buttonRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 12, marginTop: 4 },
+  usernameInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
+    fontSize: 16,
+    marginBottom: 8,
+  },
   outlineButton: {
     borderWidth: 1,
     borderRadius: 8,
@@ -294,6 +379,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   sectionTitle: { marginTop: 8, marginBottom: 4 },
+  yourPeopleSubtitle: { fontSize: 13, lineHeight: 18, marginBottom: 10, marginTop: -2 },
   yourPeopleEmpty: { gap: 12, marginBottom: 8 },
   yourPeopleEmptyText: { fontSize: 14, lineHeight: 20 },
   followMoreButton: { alignSelf: 'flex-start' },

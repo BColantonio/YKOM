@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-/** Row for UI; username/avatar are placeholders until a profiles join exists. */
+/** Row for UI: follows row + joined profile fields when available. */
 export type FollowListRow = {
   followRowId: string;
   followedId: string;
@@ -9,28 +9,49 @@ export type FollowListRow = {
 };
 
 /**
- * Loads follows for the current user as follower.
- * Selects `followed_id` from `public.follows`. Username/avatar are placeholders for now
- * (no `profiles` table in this migration).
+ * Loads people the current user follows, ordered by follow time (newest first),
+ * with `public.profiles` username and avatar_url.
  */
-export async function fetchFollowsForFollower(followerId: string): Promise<FollowListRow[]> {
-  const { data, error } = await supabase
+export async function fetchMyFollows(followerId: string): Promise<FollowListRow[]> {
+  const { data: followRows, error: followError } = await supabase
     .from('follows')
-    .select('id, followed_id')
+    .select('id, followed_id, created_at')
     .eq('follower_id', followerId)
     .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('fetchFollowsForFollower:', error.message);
+  if (followError) {
+    console.error('fetchMyFollows follows:', followError.message);
     return [];
   }
+  if (!followRows?.length) return [];
 
-  return (data ?? []).map((row) => ({
-    followRowId: String(row.id),
-    followedId: String(row.followed_id),
-    username: placeholderUsername(String(row.followed_id)),
-    avatarUrl: null as string | null,
-  }));
+  const ids = [...new Set(followRows.map((r) => r.followed_id as string))];
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url')
+    .in('id', ids);
+
+  if (profileError) {
+    console.error('fetchMyFollows profiles:', profileError.message);
+  }
+
+  const profileById = new Map((profiles ?? []).map((p) => [p.id as string, p]));
+
+  return followRows.map((row) => {
+    const fid = String(row.followed_id);
+    const p = profileById.get(fid);
+    return {
+      followRowId: String(row.id),
+      followedId: fid,
+      username: p?.username ?? placeholderUsername(fid),
+      avatarUrl: p?.avatar_url ?? null,
+    };
+  });
+}
+
+/** @deprecated Use fetchMyFollows — kept for any older imports. */
+export async function fetchFollowsForFollower(followerId: string): Promise<FollowListRow[]> {
+  return fetchMyFollows(followerId);
 }
 
 function placeholderUsername(followedId: string): string {

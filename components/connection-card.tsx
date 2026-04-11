@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useState } from 'react';
 import { LayoutAnimation, Platform, Pressable, StyleSheet, UIManager, View } from 'react-native';
 
@@ -12,7 +13,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export type PlaceholderCompatibility = { label: string; dotColor: string };
+export type PlaceholderCompatibility = { label: string; badgeColor: string };
 
 type PaletteSlice = { tint: string; icon: string };
 
@@ -38,15 +39,25 @@ export function ConnectionCard({ row, palette, compatibility }: Props) {
         onPress={toggle}
         accessibilityRole="button"
         accessibilityState={{ expanded }}>
-        <View style={[styles.avatar, { backgroundColor: palette.icon + '33' }]} />
+        {row.avatarUrl ? (
+          <Image
+            source={{ uri: row.avatarUrl }}
+            style={styles.avatar}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: palette.icon + '33' }]} />
+        )}
         <ThemedText style={styles.name} numberOfLines={1}>
           {row.username}
         </ThemedText>
         <View style={styles.right}>
-          <View style={[styles.dot, { backgroundColor: compatibility.dotColor }]} />
-          <ThemedText type="defaultSemiBold" style={{ color: palette.tint }}>
-            {compatibility.label}
-          </ThemedText>
+          <View style={[styles.compatibilityBadge, { backgroundColor: compatibility.badgeColor + '33' }]}>
+            <ThemedText type="defaultSemiBold" style={[styles.compatibilityBadgeText, { color: compatibility.badgeColor }]}>
+              {compatibility.label}
+            </ThemedText>
+          </View>
           <IconSymbol
             name="chevron.right"
             size={18}
@@ -62,7 +73,10 @@ export function ConnectionCard({ row, palette, compatibility }: Props) {
             Kink compatibility details
           </ThemedText>
           <ThemedText style={[styles.detailBody, { color: palette.icon }]}>
-            Detailed kink-by-kink breakdown will appear here once comparison logic is enabled.
+            Detailed kink-by-kink breakdown will appear here once full comparison is enabled.
+          </ThemedText>
+          <ThemedText style={[styles.detailNote, { color: palette.icon }]}>
+            Some kinks may be hidden for privacy.
           </ThemedText>
         </ThemedView>
       ) : null}
@@ -88,8 +102,16 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   name: { flex: 1, minWidth: 0 },
-  right: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
+  right: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  compatibilityBadge: {
+    minWidth: 52,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compatibilityBadgeText: { fontSize: 16, letterSpacing: 0.2 },
   detailBlock: {
     marginLeft: 58,
     marginBottom: 8,
@@ -98,4 +120,5 @@ const styles = StyleSheet.create({
   },
   detailTitle: { fontSize: 14 },
   detailBody: { fontSize: 13, lineHeight: 18 },
+  detailNote: { fontSize: 12, lineHeight: 17, fontStyle: 'italic' },
 });
