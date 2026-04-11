@@ -9,6 +9,153 @@
 
 create extension if not exists pgcrypto;
 
+-- Kink catalog: stable ids for FKs; unlock sub-kinks 101–104 under parents 1 and 2 (see migration enhance_kinks_table).
+insert into public.kinks (id, name, description, category_id, parent_id, sort_order, is_active)
+overriding system value
+select
+  v.id,
+  v.name,
+  v.description,
+  c.id,
+  v.parent_id,
+  v.sort_order,
+  true
+from (
+  values
+    (
+      1,
+      'Bondage',
+      'Being tied up, restrained, or consensually doing the tying — trust, tension, and a little theatre.'::text,
+      null::integer,
+      10
+    ),
+    (
+      2,
+      'Roleplay',
+      'Stepping into characters — playful scripts, costumes optional, chemistry required.',
+      null,
+      20
+    ),
+    (
+      3,
+      'Public play',
+      'Thrills where someone might notice — risk, rush, and boundaries you set together.',
+      null,
+      30
+    ),
+    (
+      4,
+      'Voyeurism',
+      'Watching or being watched — curiosity, consent, and the heat of attention.',
+      null,
+      40
+    ),
+    (
+      5,
+      'Sensory play',
+      'Feathers, ice, blindfolds — waking up every nerve with curiosity and consent.',
+      null,
+      50
+    ),
+    (
+      6,
+      'Impact play',
+      'Spanking, flogging, thuddy or stingy — consensual rhythm, heat, and aftercare.',
+      null,
+      60
+    ),
+    (
+      7,
+      'Power exchange',
+      'Someone leads, someone follows — roles that feel deliciously clear (and reversible).',
+      null,
+      70
+    ),
+    (
+      8,
+      'Praise & spice',
+      'Sweet words, teasing tones — building tension with voice alone.',
+      null,
+      80
+    ),
+    (
+      9,
+      'Exhibitionism',
+      'Being seen (or almost seen) on purpose — thrill, flair, and negotiated risk.',
+      null,
+      90
+    ),
+    (
+      10,
+      'Dirty talk',
+      'Whispered fantasies and bold requests — language as foreplay.',
+      null,
+      100
+    ),
+    (
+      11,
+      'Toys & tools',
+      'Vibrators, cuffs, and gadgets — props that match your plot twist.',
+      null,
+      110
+    ),
+    (
+      12,
+      'Aftercare',
+      'Cuddles, water, debrief — the soft landing after the scene.',
+      null,
+      120
+    ),
+    (
+      101,
+      'Rope bondage',
+      'Rope as art and restraint — wraps, knots, and the slow dance of tension.',
+      1,
+      11
+    ),
+    (
+      102,
+      'Shibari',
+      'Japanese-inspired rope — aesthetic, breath, and intention in every tie.',
+      1,
+      12
+    ),
+    (
+      103,
+      'Teacher/student',
+      'Detention, lessons, and extra credit — power dynamics with a syllabus.',
+      2,
+      21
+    ),
+    (
+      104,
+      'Boss/employee',
+      'Corner-office fantasies — deadlines, promotions, and very unprofessional behavior.',
+      2,
+      22
+    )
+) as v(id, name, description, parent_id, sort_order)
+cross join lateral (
+  select
+    c.id
+  from
+    public.categories c
+  where
+    c.name = 'General'
+  order by
+    c.id
+  limit
+    1
+) c
+on conflict (id) do update
+set
+  name = excluded.name,
+  description = excluded.description,
+  category_id = excluded.category_id,
+  parent_id = excluded.parent_id,
+  sort_order = excluded.sort_order,
+  is_active = excluded.is_active;
+
 -- Fixed UUIDs so references are stable across runs.
 -- Logins: kinkexplorer@test.com / curiousfox@test.com — password: password123
 

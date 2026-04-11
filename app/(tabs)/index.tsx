@@ -1,19 +1,28 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { ActivityIndicator, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView, Pressable as GesturePressable } from 'react-native-gesture-handler';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
+import { useKinks } from '@/contexts/kinks-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getUnlockKinksForParentId, type DeckKink } from '@/lib/deck-unlock';
 import { formatAuthError } from '@/lib/format-auth-error';
-import { baseDeckCategories } from '@/lib/local-kinks';
+import { rootKinksToDeck } from '@/lib/kinks';
 import { supabase } from '@/lib/supabase';
-import { SWIPE_LABELS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
+import { SWIPE_LABELS, SWIPE_STAMP_COLORS, SWIPE_VALUES, type SwipeDirection } from '@/lib/kink-preference-values';
 import { SWIPE_LIMIT } from '@/lib/swipe-limit';
 import {
   fetchMostRecentComparisonUserPreferences,
@@ -21,22 +30,16 @@ import {
   upsertUserKinkPreferences,
 } from '@/lib/user-kink-preferences';
 
+/** Swipe card model; `description` powers tap-to-expand copy from `public.kinks`. */
 type KinkCategory = DeckKink;
 type KinkSwipeResult = { kinkId: number; value: number };
 type PreferenceValue = number | null;
 
 const DEV_HARDCODED_MODE = true;
 
-/**
- * Local deck (not fetched from DB). Canonical export: {@link BASE_KINKS} from `@/lib/base-kinks`.
- * ```
- * { id: 1, name: 'bondage' },
- * { id: 2, name: 'roleplay' },
- * { id: 3, name: 'public play' },
- * { id: 4, name: 'voyeurism' },
- * ```
- */
-export { BASE_KINKS } from '@/lib/base-kinks';
+/** Max height of the description panel when fully expanded (animated open). */
+const DESCRIPTION_PANEL_MAX = 200;
+
 function categoryCompatibility(a: number, b: number): number {
   const diff = Math.abs(a - b);
   return 100 - diff;
@@ -85,6 +88,7 @@ function SwipeCard({
   backScale: number;
   gestureDisabled?: boolean;
   cardWidth: number;
+  /** Minimum height for the collapsed card (also used to size the inner face). */
   cardHeight: number;
   swipeThreshold: number;
   screenWidth: number;
@@ -92,6 +96,25 @@ function SwipeCard({
   accent: string;
   muted: string;
 }) {
+  const descriptionText = kink.description?.trim() ?? '';
+  const hasDescription = descriptionText.length > 0;
+  const [expanded, setExpanded] = useState(false);
+  const expandProgress = useSharedValue(0);
+
+  useEffect(() => {
+    setExpanded(false);
+    expandProgress.value = 0;
+  }, [kink.id]);
+
+  useEffect(() => {
+    expandProgress.value = withTiming(expanded ? 1 : 0, { duration: 320 });
+  }, [expanded]);
+
+  const toggleExpanded = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setExpanded((v) => !v);
+  }, []);
+
   const x = useSharedValue(0);
   const y = useSharedValue(0);
 
@@ -103,6 +126,7 @@ function SwipeCard({
     [onSwipeComplete, kink],
   );
 
+  /** Full-card pan only — expand/collapse is on a separate RNGH `Pressable` so swipes are never competed with taps. */
   const pan = Gesture.Pan()
     .enabled(isTop && !gestureDisabled)
     .onUpdate((e) => {
@@ -138,15 +162,62 @@ function SwipeCard({
     [backScale, screenWidth],
   );
 
-  const noOverlay = useAnimatedStyle(() => ({ opacity: interpolate(x.value, [-swipeThreshold * 1.5, 0], [1, 0]) }));
-  const yesOverlay = useAnimatedStyle(() => ({ opacity: interpolate(x.value, [0, swipeThreshold * 1.5], [0, 1]) }));
-  const moodOverlay = useAnimatedStyle(() => ({ opacity: interpolate(y.value, [-swipeThreshold * 1.5, 0], [1, 0]) }));
-  const maybeOverlay = useAnimatedStyle(() => ({ opacity: interpolate(y.value, [0, swipeThreshold * 1.5], [0, 1]) }));
+  const stampRange = swipeThreshold * 1.5;
+  const noOverlay = useAnimatedStyle(() => {
+    const ax = Math.abs(x.value);
+    const ay = Math.abs(y.value);
+    if (ax < ay) return { opacity: 0 };
+    return {
+      opacity: interpolate(x.value, [-stampRange, 0], [1, 0], Extrapolation.CLAMP),
+    };
+  }, [stampRange]);
+  const yesOverlay = useAnimatedStyle(() => {
+    const ax = Math.abs(x.value);
+    const ay = Math.abs(y.value);
+    if (ax < ay) return { opacity: 0 };
+    return {
+      opacity: interpolate(x.value, [0, stampRange], [0, 1], Extrapolation.CLAMP),
+    };
+  }, [stampRange]);
+  const moodOverlay = useAnimatedStyle(() => {
+    const ax = Math.abs(x.value);
+    const ay = Math.abs(y.value);
+    if (ax >= ay) return { opacity: 0 };
+    return {
+      opacity: interpolate(y.value, [-stampRange, 0], [1, 0], Extrapolation.CLAMP),
+    };
+  }, [stampRange]);
+  const maybeOverlay = useAnimatedStyle(() => {
+    const ax = Math.abs(x.value);
+    const ay = Math.abs(y.value);
+    if (ax >= ay) return { opacity: 0 };
+    return {
+      opacity: interpolate(y.value, [0, stampRange], [0, 1], Extrapolation.CLAMP),
+    };
+  }, [stampRange]);
+
+  const descriptionPanelStyle = useAnimatedStyle(() => {
+    const open = expandProgress.value;
+    return {
+      maxHeight: interpolate(open, [0, 1], [0, DESCRIPTION_PANEL_MAX]),
+      opacity: interpolate(open, [0, 0.12, 1], [0, 0, 1]),
+      marginTop: interpolate(open, [0, 1], [0, 6]),
+    };
+  }, []);
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.card, { width: cardWidth, height: cardHeight, zIndex: isTop ? 2 : 1 }, cardStyle]}>
-        <ThemedView style={[styles.cardInner, { borderColor: `${accent}55` }]}>
+      <Animated.View
+        style={[
+          styles.card,
+          {
+            width: cardWidth,
+            minHeight: cardHeight,
+            zIndex: isTop ? 2 : 1,
+          },
+          cardStyle,
+        ]}>
+        <ThemedView style={[styles.cardInner, { borderColor: `${accent}55`, minHeight: cardHeight }]}>
           {kink.parentLabel ? (
             <ThemedText style={[styles.cardParentLabel, { color: muted }]} numberOfLines={2}>
               {kink.parentLabel}
@@ -155,19 +226,47 @@ function SwipeCard({
           <ThemedText type="title" style={styles.cardTitle}>
             {kink.label}
           </ThemedText>
-          <ThemedText style={[styles.cardHint, { color: muted }]}>Swipe to decide</ThemedText>
+          {hasDescription ? (
+            <GesturePressable
+              accessibilityRole="button"
+              accessibilityLabel={expanded ? 'Hide kink description' : 'Show kink description'}
+              hitSlop={{ top: 12, bottom: 12, left: 20, right: 20 }}
+              onPress={toggleExpanded}
+              style={styles.cardTapHintPressable}>
+              <ThemedText style={[styles.cardTapHint, { color: muted }]}>
+                {expanded ? 'Tap to hide · swipe the card to decide' : 'Tap here for details · swipe the card to decide'}
+              </ThemedText>
+            </GesturePressable>
+          ) : (
+            <ThemedText style={[styles.cardHint, { color: muted }]}>Swipe to decide</ThemedText>
+          )}
+          {hasDescription ? (
+            <Animated.View style={[styles.cardDescriptionWrap, descriptionPanelStyle]} pointerEvents="box-none">
+              <ScrollView
+                pointerEvents={expanded ? 'auto' : 'none'}
+                style={styles.cardDescriptionScroll}
+                contentContainerStyle={styles.cardDescriptionScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={descriptionText.length > 160}>
+                <ThemedText style={[styles.cardDescription, { color: muted }]}>{descriptionText}</ThemedText>
+              </ScrollView>
+            </Animated.View>
+          ) : null}
 
-          <Animated.View style={[styles.stamp, styles.stampLeft, noOverlay]}>
-            <ThemedText style={[styles.stampText, { color: '#c62828' }]}>{SWIPE_LABELS.no}</ThemedText>
+          <Animated.View style={[styles.stamp, styles.stampLeft, { borderColor: SWIPE_STAMP_COLORS.no }, noOverlay]}>
+            <ThemedText style={[styles.stampText, { color: SWIPE_STAMP_COLORS.no }]}>{SWIPE_LABELS.no}</ThemedText>
           </Animated.View>
-          <Animated.View style={[styles.stamp, styles.stampRight, yesOverlay]}>
-            <ThemedText style={[styles.stampText, { color: '#2e7d32' }]}>{SWIPE_LABELS.yes}</ThemedText>
+          <Animated.View style={[styles.stamp, styles.stampRight, { borderColor: SWIPE_STAMP_COLORS.yes }, yesOverlay]}>
+            <ThemedText style={[styles.stampText, { color: SWIPE_STAMP_COLORS.yes }]}>{SWIPE_LABELS.yes}</ThemedText>
           </Animated.View>
-          <Animated.View style={[styles.stamp, styles.stampTop, moodOverlay]}>
-            <ThemedText style={[styles.stampText, { color: '#6a1b9a' }]}>{SWIPE_LABELS.mood}</ThemedText>
+          <Animated.View style={[styles.stamp, styles.stampTop, { borderColor: SWIPE_STAMP_COLORS.mood }, moodOverlay]}>
+            <ThemedText style={[styles.stampText, { color: SWIPE_STAMP_COLORS.mood }]}>{SWIPE_LABELS.mood}</ThemedText>
           </Animated.View>
-          <Animated.View style={[styles.stamp, styles.stampBottom, maybeOverlay]}>
-            <ThemedText style={[styles.stampText, { color: '#ef6c00' }]}>{SWIPE_LABELS.probablyNot}</ThemedText>
+          <Animated.View
+            style={[styles.stamp, styles.stampBottom, { borderColor: SWIPE_STAMP_COLORS.probablyNot }, maybeOverlay]}>
+            <ThemedText style={[styles.stampText, { color: SWIPE_STAMP_COLORS.probablyNot }]}>
+              {SWIPE_LABELS.probablyNot}
+            </ThemedText>
           </Animated.View>
         </ThemedView>
       </Animated.View>
@@ -179,10 +278,17 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
+  const { kinks, loading: kinksLoading } = useKinks();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const swipeThreshold = useMemo(() => Math.min(120, screenWidth * 0.22), [screenWidth]);
   const cardWidth = useMemo(() => Math.min(screenWidth * 0.9, 400), [screenWidth]);
-  const cardHeight = useMemo(() => Math.min(340, screenHeight * 0.42), [screenHeight]);
+  /** Minimum height when collapsed: ties to card width (~1:0.7) and screen, clamped so the deck feels substantial on all phones. */
+  const cardHeight = useMemo(() => {
+    const fromScreen = screenHeight * 0.44;
+    const fromAspect = cardWidth * 0.72;
+    const blended = Math.max(fromScreen, fromAspect);
+    return Math.round(Math.min(420, Math.max(312, blended)));
+  }, [screenHeight, cardWidth]);
 
   const [index, setIndex] = useState(0);
   const [swipeResults, setSwipeResults] = useState<KinkSwipeResult[]>([]);
@@ -200,6 +306,8 @@ export default function HomeScreen() {
   const [unlockToast, setUnlockToast] = useState<{ count: number } | null>(null);
   const unlockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deckRef = useRef<KinkCategory[]>([]);
+  /** One-time deck + session bootstrap after kinks load from Supabase. */
+  const deckBootstrapRef = useRef(false);
   useEffect(() => {
     deckRef.current = kinkCategories;
   }, [kinkCategories]);
@@ -225,16 +333,20 @@ export default function HomeScreen() {
   const atSwipeLimit = swipesUsed >= SWIPE_LIMIT;
 
   useEffect(() => {
+    if (kinksLoading || deckBootstrapRef.current) return;
+    const deck = rootKinksToDeck(kinks);
+    if (deck.length === 0) {
+      setAuthMessage('No active kinks in the database. Apply migrations and seed.');
+      setPrefsLoading(false);
+      return;
+    }
+    deckBootstrapRef.current = true;
+    setKinkCategories(deck);
+
     let cancelled = false;
-    (async () => {
+    void (async () => {
       setPrefsLoading(true);
-      const deck = baseDeckCategories();
-      if (!cancelled) setKinkCategories(deck);
-      if (deck.length === 0) {
-        setAuthMessage('No kinks defined in the local deck.');
-        setPrefsLoading(false);
-        return;
-      }
+      const initialDeck = deck;
       if (DEV_HARDCODED_MODE) {
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         if (sessionError && sessionError.message !== 'Auth session missing!') {
@@ -262,7 +374,7 @@ export default function HomeScreen() {
           return;
         }
         setCurrentUserId(user.id);
-        await initializeUserKinkPreferences(user.id, deck.map((k) => k.id), null);
+        await initializeUserKinkPreferences(user.id, initialDeck.map((k) => k.id), null);
         const loaded = await fetchMostRecentComparisonUserPreferences(user.id);
         setOtherUserPrefs(loaded?.prefs ?? new Map());
         setComparisonUnavailable(!loaded);
@@ -305,7 +417,7 @@ export default function HomeScreen() {
       const userId = user.id;
       setCurrentUserId(userId);
       setAuthMessage(null);
-      await initializeUserKinkPreferences(userId, deck.map((k) => k.id), null);
+      await initializeUserKinkPreferences(userId, initialDeck.map((k) => k.id), null);
       const loaded = await fetchMostRecentComparisonUserPreferences(userId);
       if (cancelled) return;
       setOtherUserPrefs(loaded?.prefs ?? new Map());
@@ -315,7 +427,7 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [kinks, kinksLoading]);
 
   useEffect(() => {
     if (!currentUserId || index !== kinkCategories.length || hasSaved) return;
@@ -360,7 +472,7 @@ export default function HomeScreen() {
 
       let fetched: DeckKink[] = [];
       if (value === 67 || value === 100) {
-        fetched = getUnlockKinksForParentId(kink.id);
+        fetched = getUnlockKinksForParentId(kink.id, kinks);
       }
 
       const prev = deckRef.current;
@@ -393,7 +505,7 @@ export default function HomeScreen() {
       setIndex((i) => i + 1);
       setSwipesUsed((n) => n + 1);
     },
-    [swipesUsed, currentUserId, showUnlockToast],
+    [swipesUsed, currentUserId, showUnlockToast, kinks],
   );
 
   const current = kinkCategories[index];
@@ -432,17 +544,19 @@ export default function HomeScreen() {
           </ThemedText>
         ) : null}
         <View style={styles.deck}>
-          {prefsLoading ? (
+          {prefsLoading || kinksLoading ? (
             <ActivityIndicator size="large" color={palette.tint} />
           ) : currentUserId == null ? (
-            <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
+            <ThemedView
+              style={[styles.empty, { width: cardWidth, minHeight: cardHeight, borderColor: `${palette.tint}44` }]}>
               <ThemedText type="title">Authentication required</ThemedText>
               <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>
                 Sign in (or enable anonymous auth) before swiping so preferences can be saved.
               </ThemedText>
             </ThemedView>
           ) : current == null ? (
-            <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
+            <ThemedView
+              style={[styles.empty, { width: cardWidth, minHeight: cardHeight, borderColor: `${palette.tint}44` }]}>
               <ThemedText type="title">You’re through the deck</ThemedText>
               {comparisonUnavailable ? (
                 <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>No profiles available to compare yet</ThemedText>
@@ -451,7 +565,8 @@ export default function HomeScreen() {
               ) : null}
             </ThemedView>
           ) : atSwipeLimit ? (
-            <ThemedView style={[styles.empty, { width: cardWidth, borderColor: `${palette.tint}44` }]}>
+            <ThemedView
+              style={[styles.empty, { width: cardWidth, minHeight: cardHeight, borderColor: `${palette.tint}44` }]}>
               <ThemedText type="title">Swipe limit reached</ThemedText>
               <ThemedText style={{ color: palette.icon, textAlign: 'center' }}>
                 You&apos;ve reached your swipe limit. Upgrade for unlimited swipes.
@@ -534,17 +649,50 @@ const styles = StyleSheet.create({
   limitBanner: { fontSize: 14, marginBottom: 8, textAlign: 'center' },
   deck: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { position: 'absolute', alignSelf: 'center' },
-  cardInner: { flex: 1, borderRadius: 20, borderWidth: 2, padding: 24, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  cardInner: {
+    width: '100%',
+    borderRadius: 20,
+    borderWidth: 2,
+    padding: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   cardParentLabel: { fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 6, opacity: 0.92 },
-  cardTitle: { textAlign: 'center', marginBottom: 12 },
+  cardTitle: { textAlign: 'center', marginBottom: 8 },
   cardHint: { fontSize: 14 },
+  cardTapHintPressable: { alignSelf: 'stretch', paddingVertical: 4, marginBottom: 0 },
+  cardTapHint: { fontSize: 13, fontStyle: 'italic', textAlign: 'center' },
+  cardDescriptionWrap: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  cardDescriptionScroll: { width: '100%', maxHeight: DESCRIPTION_PANEL_MAX },
+  cardDescriptionScrollContent: { paddingBottom: 4 },
+  cardDescription: { fontSize: 15, lineHeight: 22, textAlign: 'center' },
   stamp: { position: 'absolute', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
   stampText: { fontSize: 18, fontWeight: '800', letterSpacing: 1 },
-  stampLeft: { left: 16, top: '40%', borderColor: '#c62828', transform: [{ rotate: '-12deg' }] },
-  stampRight: { right: 16, top: '40%', borderColor: '#2e7d32', transform: [{ rotate: '12deg' }] },
-  stampTop: { top: 20, alignSelf: 'center', borderColor: '#6a1b9a' },
-  stampBottom: { bottom: 20, alignSelf: 'center', borderColor: '#ef6c00' },
-  empty: { borderRadius: 20, borderWidth: 2, padding: 28, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  stampLeft: {
+    left: '13%',
+    top: '38%',
+    transform: [{ rotate: '-12deg' }],
+  },
+  stampRight: {
+    right: '13%',
+    top: '38%',
+    transform: [{ rotate: '12deg' }],
+  },
+  stampTop: { top: '14%', alignSelf: 'center' },
+  stampBottom: { bottom: '14%', alignSelf: 'center' },
+  empty: {
+    borderRadius: 20,
+    borderWidth: 2,
+    padding: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'center',
+  },
   unlockToastOverlay: {
     justifyContent: 'flex-end',
     paddingHorizontal: 20,

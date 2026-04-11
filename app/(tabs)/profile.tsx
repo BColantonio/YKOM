@@ -21,6 +21,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Collapsible } from '@/components/ui/collapsible';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
+import { useKinks } from '@/contexts/kinks-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useFollows } from '@/hooks/use-follows';
 import { updateProfileUsername } from '@/lib/profiles';
@@ -63,6 +64,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, profile, initialized, profileLoading, refreshProfile, signOut } = useAuth();
+  const { kinks, loading: kinksLoading } = useKinks();
 
   const userId = user?.id ?? null;
   const authLoading = !initialized;
@@ -92,12 +94,12 @@ export default function ProfileScreen() {
   );
 
   const loadPreferences = useCallback(async () => {
-    if (!userId) return;
+    if (!userId || kinksLoading) return;
     setPrefsLoading(true);
-    const data = await fetchUserPreferencesGroupedByCategory(userId);
+    const data = await fetchUserPreferencesGroupedByCategory(userId, kinks);
     setGrouped(preferencesWithCompletedSwipesOnly(data));
     setPrefsLoading(false);
-  }, [userId]);
+  }, [userId, kinks, kinksLoading]);
 
   useEffect(() => {
     void loadPreferences();
@@ -219,7 +221,7 @@ export default function ProfileScreen() {
           <ActivityIndicator size="small" color={palette.tint} />
         ) : userId == null ? (
           <ThemedText style={{ color: palette.icon }}>Sign in to load preferences.</ThemedText>
-        ) : prefsLoading ? (
+        ) : prefsLoading || kinksLoading ? (
           <ActivityIndicator size="small" color={palette.tint} />
         ) : grouped.length === 0 ? (
           <ThemedText style={{ color: palette.icon }}>No saved preferences yet.</ThemedText>

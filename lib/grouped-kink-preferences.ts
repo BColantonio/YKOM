@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { getKinkLabelById } from '@/lib/local-kinks';
+import { buildKinkIdMap, fetchAllKinks, type Kink } from '@/lib/kinks';
 
 export type GroupedKinkPreference = {
   kinkId: number;
@@ -14,9 +14,10 @@ export type GroupedKinkPreferencesByCategory = {
 
 const PROFILE_CATEGORY = 'Your kinks';
 
-/** Loads preferences from Supabase; kink names come from the local registry (no `kinks` table fetch). */
+/** Loads preferences from Supabase; pass `kinkList` from cache to avoid a second `kinks` fetch. */
 export async function fetchUserPreferencesGroupedByCategory(
   userId: string,
+  kinkList?: Kink[],
 ): Promise<GroupedKinkPreferencesByCategory[]> {
   const { data: prefRows, error: prefError } = await supabase
     .from('user_kink_preferences')
@@ -29,9 +30,13 @@ export async function fetchUserPreferencesGroupedByCategory(
   }
   if (!prefRows?.length) return [];
 
+  const list = kinkList?.length ? kinkList : await fetchAllKinks();
+  const byId = buildKinkIdMap(list);
+
   const kinks: GroupedKinkPreference[] = [];
   for (const row of prefRows) {
-    const name = getKinkLabelById(row.kink_id);
+    const meta = byId.get(row.kink_id);
+    const name = meta?.name;
     if (!name) continue;
     kinks.push({
       kinkId: row.kink_id,

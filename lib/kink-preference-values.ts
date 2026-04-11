@@ -25,6 +25,13 @@ export const SWIPE_LABELS: Record<SwipeDirection, string> = {
   probablyNot: 'MAYBE',
 };
 
+export const SWIPE_STAMP_COLORS: Record<SwipeDirection, string> = {
+  no: '#c62828',
+  probablyNot: '#e65100',
+  mood: '#689f38',
+  yes: '#2e7d32',
+};
+
 export function preferenceValueToShortLabel(value: StoredPreferenceValue): string {
   if (value === null) return 'Not set';
   switch (value) {
