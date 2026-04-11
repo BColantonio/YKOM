@@ -11,25 +11,36 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Collapsible } from '@/components/ui/collapsible';
+import { ConnectionCard, type PlaceholderCompatibility } from '@/components/connection-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useFollows } from '@/hooks/use-follows';
 import { ensureSignedInUserId } from '@/lib/auth-session';
-import {
-  EDIT_OPTIONS,
-  preferenceValueToShortLabel,
-  type StoredPreferenceValue,
-} from '@/lib/kink-preference-values';
 import {
   fetchUserPreferencesGroupedByCategory,
   type GroupedKinkPreference,
   type GroupedKinkPreferencesByCategory,
 } from '@/lib/grouped-kink-preferences';
+import {
+  EDIT_OPTIONS,
+  preferenceValueToShortLabel,
+  type StoredPreferenceValue,
+} from '@/lib/kink-preference-values';
 import { upsertUserKinkPreferences } from '@/lib/user-kink-preferences';
 
 /** Profile lists only kinks the user has committed (saved value: 0, 33, 67, or 100). */
+function placeholderCompatibilityForRow(index: number): PlaceholderCompatibility {
+  const presets: PlaceholderCompatibility[] = [
+    { label: '92%', dotColor: '#2e7d32' },
+    { label: '78%', dotColor: '#f9a825' },
+    { label: '64%', dotColor: '#c62828' },
+  ];
+  return presets[index % presets.length] ?? { label: '––%', dotColor: '#888888' };
+}
+
 function preferencesWithCompletedSwipesOnly(
   sections: GroupedKinkPreferencesByCategory[],
 ): GroupedKinkPreferencesByCategory[] {
@@ -102,6 +113,8 @@ export default function ProfileScreen() {
       void loadPreferences();
     }, [loadPreferences]),
   );
+
+  const { follows: followedPeople, loading: followsLoading } = useFollows(userId);
 
   const updateKinkLocal = useCallback((kinkId: number, value: StoredPreferenceValue) => {
     setGrouped((prev) =>
@@ -206,6 +219,37 @@ export default function ProfileScreen() {
             </Collapsible>
           ))
         )}
+
+        <ThemedText type="subtitle" style={styles.sectionTitle}>
+          Your People
+        </ThemedText>
+
+        {authLoading ? null : userId == null ? (
+          <ThemedText style={{ color: palette.icon }}>Sign in to see people you follow.</ThemedText>
+        ) : followsLoading ? (
+          <ActivityIndicator size="small" color={palette.tint} />
+        ) : followedPeople.length === 0 ? (
+          <ThemedView style={styles.yourPeopleEmpty}>
+            <ThemedText style={[styles.yourPeopleEmptyText, { color: palette.icon }]}>
+              You&apos;re not following anyone yet.
+            </ThemedText>
+            <Pressable
+              style={[styles.outlineButton, styles.followMoreButton, { borderColor: palette.tint }]}
+              onPress={() => {}}
+              accessibilityRole="button">
+              <ThemedText type="defaultSemiBold">+ Follow more people</ThemedText>
+            </Pressable>
+          </ThemedView>
+        ) : (
+          followedPeople.map((row, index) => (
+            <ConnectionCard
+              key={row.followRowId}
+              row={row}
+              palette={palette}
+              compatibility={placeholderCompatibilityForRow(index)}
+            />
+          ))
+        )}
       </ScrollView>
 
       <Modal visible={editing != null} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
@@ -250,6 +294,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   sectionTitle: { marginTop: 8, marginBottom: 4 },
+  yourPeopleEmpty: { gap: 12, marginBottom: 8 },
+  yourPeopleEmptyText: { fontSize: 14, lineHeight: 20 },
+  followMoreButton: { alignSelf: 'flex-start' },
   kinkRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
